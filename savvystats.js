@@ -11,10 +11,6 @@
  * 
  * Dependency
  *  - Math object (native to JS)
- *
- * @author tikenn <tikennprogrammer@gmail.com>
- * @copyright 2015
- * @license http://opensource.org/licenses/MIT MIT License
  */
 
 var ss = (function() {
