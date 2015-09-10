@@ -1,15 +1,20 @@
 /**
+ * Savvy Stats v0.0-alpha (http://savvystats.tk)
+ * Copyright 2015 Tim Kennell Jr.
+ * Licensed under the MIT License (http://opensource.org/licenses/MIT)
+ */
+
+/**
  * Statistics library capable of performing various calculations with JSON data
  * Note that recursion is used frequently to prevent excessive error checking in arrays 
  *     and allow faster performance
  * 
- * Returns -- object
- * 
  * Dependency
  *  - Math object (native to JS)
  *
- * @author tikenn
- * @license http://www.gnu.org/licenses/ GNU GPLv3 Licence
+ * @author tikenn <tikennprogrammer@gmail.com>
+ * @copyright 2015
+ * @license http://opensource.org/licenses/MIT MIT License
  */
 
 var ss = (function() {
