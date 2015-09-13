@@ -9,12 +9,17 @@
  * 
  * Dependency
  *  - Math object (native to JS)
+ *  - BigRational.js
  */
-var ss = (function() {
+var ss = (function(undefined) {
     "use strict";
 
     // Set up global object to return into the ss object
-    var globalObject = {};
+    var globalObject = function(json) {
+        if (typeof json === "undefined") return "Error: need a file argument.";
+        return new jsonData(json);
+    };
+
     globalObject.errors = [];
 
     /*==========================*
@@ -67,6 +72,19 @@ var ss = (function() {
      * Statistics Library Section *
      *============================*/
 
+     /**
+      * Class for creating objects that hold JSON
+      * Allows addition of statistical functions to prototype for easy calculations
+      */
+    function jsonData(json) {
+        var self = this;
+        if (!(json instanceof Array)) {
+            self.json = undefined;
+        } else {
+            self.json = json;
+        }
+    }
+
     /**
      * Class that will be used for pseudo-type-hinting to ensure that JSON data are only validated once
      * This uses filtered or non-filtered json and stores the count for repeated use as well (saves on processing)
@@ -84,6 +102,7 @@ var ss = (function() {
             self.count = count;
         }
     }
+
 
     /**
      * Validates a JSON array and any columns provided to it (allowed to be a variable number of params)
@@ -202,66 +221,6 @@ var ss = (function() {
                 globalObject.errors.push(errorArray[i]);
             }
         }
-    }
-
-    /**
-     * Provides the number of data points remaining after applying a filter
-     * WARNING!!!! This should only be applied to validated data as it is too expensive to re-validate in this function
-     * 
-     * @param (JSON array) json
-     * @param String column
-     * @param function filterCb
-     *     takes an object in the JSON array
-     *     should return true or false
-     *     used to filter values in column used for mean based on values in the same column or other columns
-     *     e.g. function(data) {data.column == "value";}
-     */
-    var filterCount = function(json, filterCb) {
-        // Force data passed to this function to be validated
-        if (json instanceof ValidJson) {
-            
-            // Instantiate counter and begin going through data
-            var count = 0;
-            for (var i = 0; i < json.validJson.length; i++) {
-                
-                // Skip the row (object) if it doesn't fit the filter
-                if (filterCb(json.validJson[i]) == false) continue;
-                
-                // Otherwise, add to counter
-                count++;
-            }
-        }
-        return count;
-    };
-
-    /**
-     * Filters data for functions that don't use the sum function (sum function automatically filters data)
-     * WARNING!!!! This should only be applied to validated data as it is too expensive to re-validate in this function
-     * 
-     * @param (JSON array) json
-     * @param String column
-     * @param function filterCb
-     *     takes an object in the JSON array
-     *     should return true or false
-     *     used to filter values in column used for mean based on values in the same column or other columns
-     *     e.g. function(data) {data.column == "value";}
-     */
-    var filterData = function(json, filterCb) {
-        // Force data passed to this function to be validated
-        if (json instanceof ValidJson) {
-            
-            // Instantiate counter and begin going through data
-            var filteredJson = [];
-            for (var i = 0; i < json.validJson.length; i++) {
-                
-                // Skip the row (object) if it doesn't fit the filter
-                if (filterCb(json.validJson[i]) == false) continue;
-                
-                // Otherwise, add it to the filtered JSON
-                filteredJson.push(json.validJson[i]);
-            }
-        }
-        return filteredJson;
     };
 
     /**
@@ -349,10 +308,10 @@ var ss = (function() {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
             var total = 0;
-            var mean = globalObject.mean(json, column, filterCb);
+            var avg = mean(json, column, filterCb);
 
             for (var i = 0; i < json.validJson.length; i++) {
-                total += Math.pow((parseFloat(json.validJson[i][column]) - mean), 2);
+                total += Math.pow((parseFloat(json.validJson[i][column]) - avg), 2);
             }
 
             return total;
@@ -368,7 +327,7 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.sumOfSquares(validJson, column, filterCb);
+                return sumOfSquares(validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
@@ -386,7 +345,7 @@ var ss = (function() {
      * @param (JSON array) json
      * @param String column
      */
-    globalObject.logtrans = function(json, column) {
+    var logtrans = function(json, column) {
         // set up something to catch errors
         var error = [];
 
@@ -440,6 +399,11 @@ var ss = (function() {
         return transformedJson;
     };
 
+    // Add logtrans to prototype and return new jsonData for stringing methods
+    jsonData.prototype.logtrans = function(column) {
+        return new jsonData(logtrans(this.json, column));
+    };
+
     /**
      * Calculates the minimum of a data set (column)
      * Data in column can be filtered with callback (filterCb)
@@ -452,7 +416,7 @@ var ss = (function() {
      *     used to filter values in column used for calculation based on values in the same column or other columns
      *     e.g. function(data) {data.column == "value";}
      */
-    globalObject.min = function(json, column, filterCb) {
+    var min = function(json, column, filterCb) {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
             var sortedJson = jsonSort(json.validJson, column);      // sort json on column
@@ -469,13 +433,18 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.min(validJson, column, filterCb);
+                return min(validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
                 storeAndDisplayErrors(validationReport.errors);
             }
         }
+    };
+
+    // Add min to prototype for easy access
+    jsonData.prototype.min = function(column, filterCb) {
+        return min(this.json, column, filterCb);
     };
 
     /**
@@ -490,7 +459,7 @@ var ss = (function() {
      *     used to filter values in column used for calculation based on values in the same column or other columns
      *     e.g. function(data) {data.column == "value";}
      */
-    globalObject.max = function(json, column, filterCb) {
+    var max = function(json, column, filterCb) {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
             var sortedJson = jsonSort(json.validJson, column);        // sort json on column
@@ -507,7 +476,7 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.max(validJson, column, filterCb);
+                return max(validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
@@ -515,6 +484,12 @@ var ss = (function() {
             }
         }
     };
+
+    // Add max to prototype for easy access
+    jsonData.prototype.max = function(column, filterCb) {
+        return max(this.json, column, filterCb);
+    };
+
 
     /**
      * Calculates the range of a data set (column)
@@ -528,10 +503,10 @@ var ss = (function() {
      *     used to filter values in column used for calculation based on values in the same column or other columns
      *     e.g. function(data) {data.column == "value";}
      */
-    globalObject.range = function(json, column, filterCb) {
+    var range = function(json, column, filterCb) {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
-            return globalObject.max(json, column, filterCb) - globalObject.min(json, column, filterCb);
+            return max(json, column, filterCb) - min(json, column, filterCb);
 
         // Data has not been validated
         } else {
@@ -544,7 +519,7 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.range(validJson, column, filterCb);
+                return range(validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
@@ -552,6 +527,12 @@ var ss = (function() {
             }
         }
     };
+
+    // Add range to prototype for easy access
+    jsonData.prototype.range = function(column, filterCb) {
+        return range(this.json, column, filterCb);
+    };
+
 
     /**
      * Calculates the mean of a data set (column)
@@ -565,7 +546,7 @@ var ss = (function() {
      *     used to filter values in column used for calculation based on values in the same column or other columns
      *     e.g. function(data) {data.column == "value";}
      */
-    globalObject.mean = function(json, column, filterCb) {
+    var mean = function(json, column, filterCb) {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
             return sum(json.validJson, column, filterCb)/json.count;
@@ -581,13 +562,18 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.mean(validJson, column, filterCb);
+                return mean(validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
                 storeAndDisplayErrors(validationReport.errors);
             }
         }
+    };
+
+    // Allowing jsonData to have access to mean for easy calculation on any column
+    jsonData.prototype.mean = function(column, filterCb) {
+        return mean(this.json, column, filterCb);
     };
 
     /**
@@ -602,10 +588,10 @@ var ss = (function() {
      *     used to filter values in column used for calculation based on values in the same column or other columns
      *     e.g. function(data) {data.column == "value";}
      */
-    globalObject.geomean = function(json, column, filterCb) {
+    var geomean = function(json, column, filterCb) {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
-            var logJson = globalObject.logtrans(json.validJson, column);
+            var logJson = logtrans(json.validJson, column);
             return Math.exp(sum(logJson, column, filterCb)/json.count);
 
         // Data has not been validated
@@ -619,13 +605,18 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.geomean(validJson, column, filterCb);
+                return geomean(validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
                 storeAndDisplayErrors(validationReport.errors);
             }
         }
+    };
+
+    // Allow easy access to geomean through prototype
+    jsonData.prototype.geomean = function(column, filterCb) {
+        return geomean(this.json, column, filterCb);
     };
 
     /**
@@ -641,7 +632,7 @@ var ss = (function() {
      *     used to filter values in column used for calculation based on values in the same column or other columns
      *     e.g. function(data) {data.column == "value";}
      */
-    globalObject.percentile = function(k, json, column, filterCb) {
+    var percentile = function(k, json, column, filterCb) {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
 
@@ -691,13 +682,18 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.percentile(k, validJson, column, filterCb);
+                return percentile(k, validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
                 storeAndDisplayErrors(validationReport.errors);
             }
         }
+    };
+
+    // Add percentile to prototype for easy access
+    jsonData.prototype.percentile = function(k, column, filterCb) {
+        return percentile(k, this.json, column, filterCb);
     };
 
     /**
@@ -713,12 +709,12 @@ var ss = (function() {
      *     used to filter values in column used for calculation based on values in the same column or other columns
      *     e.g. function(data) {data.column == "value";}
      */
-    globalObject.median = function(json, column, filterCb) {
+    var median = function(json, column, filterCb) {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
 
             // Median is the 50th percentile
-            return globalObject.percentile(50, json.validJson, column, filterCb);
+            return percentile(50, json.validJson, column, filterCb);
 
         // Data has not been validated
         } else {
@@ -731,13 +727,18 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.median(validJson, column, filterCb);
+                return median(validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
                 storeAndDisplayErrors(validationReport.errors);
             }
         }
+    };
+
+    // Add median to prototype for easy access
+    jsonData.prototype.median = function(column, filterCb) {
+        return median(this.json, column, filterCb);
     };
 
     /**
@@ -754,19 +755,19 @@ var ss = (function() {
      *     used to filter values in column used for calculation based on values in the same column or other columns
      *     e.g. function(data) {data.column == "value";}
      */
-    globalObject.quartile = function(type, json, column, filterCb) {
+    var quartile = function(type, json, column, filterCb) {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
 
             // Quartiles are special percentiles, so using the type of quartile to calculate the related percentile
             if (type === 1) {
-                return globalObject.percentile(25, json.validJson, column, filterCb);
+                return percentile(25, json.validJson, column, filterCb);
             } else if (type === 2) {
-                return globalObject.percentile(50, json.validJson, column, filterCb);
+                return percentile(50, json.validJson, column, filterCb);
             } else if (type === 3) {
-                return globalObject.percentile(75, json.validJson, column, filterCb);
+                return percentile(75, json.validJson, column, filterCb);
             } else if (type === 4) {
-                return globalObject.percentile(100, json.validJson, column, filterCb);
+                return percentile(100, json.validJson, column, filterCb);
             } else {
                 console.error(type + " is not a quartile. Appropriate quartiles are 1, 2, 3, 4");
                 globalObject.errors.push(type + " is not a quartile. Appropriate quartiles are 1, 2, 3, 4");
@@ -783,7 +784,7 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.quartile(type, validJson, column, filterCb);
+                return quartile(type, validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
@@ -791,6 +792,12 @@ var ss = (function() {
             }
         }
     };
+
+    // Add quartile to prototype for easy access
+    jsonData.prototype.quartile = function(type, column, filterCb) {
+        return quartile(type, this.json, column, filterCb);
+    };
+
 
     /**
      * Calculates the mode of a data set (column)
@@ -805,7 +812,7 @@ var ss = (function() {
      *     used to filter values in column used for calculation based on values in the same column or other columns
      *     e.g. function(data) {data.column == "value";}
      */
-    globalObject.mode = function(json, column, filterCb) {
+    var mode = function(json, column, filterCb) {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
 
@@ -867,13 +874,18 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.mode(validJson, column, filterCb);
+                return mode(validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
                 storeAndDisplayErrors(validationReport.errors);
             }
         }
+    };
+
+    // Add mode to prototype for easy access
+    jsonData.prototype.mode = function(column, filterCb) {
+        return mode(this.json, column, filterCb);
     };
 
     /**
@@ -888,7 +900,7 @@ var ss = (function() {
      *     used to filter values in column used for calculation based on values in the same column or other columns
      *     e.g. function(data) {data.column == "value";}
      */
-    globalObject.variance = function(json, column, filterCb) {
+    var variance = function(json, column, filterCb) {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
             
@@ -906,13 +918,18 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.variance(validJson, column, filterCb);
+                return variance(validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
                 storeAndDisplayErrors(validationReport.errors);
             }
         }
+    };
+
+    // Add variance to prototype for easy access
+    jsonData.prototype.variance = function(column, filterCb) {
+        return variance(this.json, column, filterCb);
     };
 
     /**
@@ -927,10 +944,10 @@ var ss = (function() {
      *     used to filter values in column used for calculation based on values in the same column or other columns
      *     e.g. function(data) {data.column == "value";}
      */
-    globalObject.stdev = function(json, column, filterCb) {
+    var stdev = function(json, column, filterCb) {
         // If JSON has already been validated, crunch numbers
         if (json instanceof ValidJson) {
-            return Math.sqrt(globalObject.variance(json, column, filterCb));
+            return Math.sqrt(variance(json, column, filterCb));
         
         // Data has not been validated
         } else {
@@ -943,13 +960,18 @@ var ss = (function() {
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
                 
                 // Recursively call function again as json is now valid and will pass the first if statement
-                return globalObject.stdev(validJson, column, filterCb);
+                return stdev(validJson, column, filterCb);
             
             // JSON is not valid, display errors
             } else {
                 storeAndDisplayErrors(validationReport.errors);
             }
         }
+    };
+
+    // Add stdev to prototype for easy access
+    jsonData.prototype.stdev = function(column, filterCb) {
+        return stdev(this.json, column, filterCb);
     };
 
     return globalObject;
