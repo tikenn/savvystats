@@ -9,14 +9,20 @@
  * 
  * Dependency
  *  - Math object (native to JS)
- *  - BigRational.js
+ *  - math.js (https://github.com/josdejong/mathjs) Copyright (C) 2013-2015 Jos de Jong wjosdejong@gmail.com under the Apache 2.0 License
  */
-var ss = (function(undefined) {
+
+// Require the mathjs Package
+if (typeof math === "undefined") {
+    throw new Error("This package requires the math.js package (https://github.com/josdejong/mathjs) for some of its functions to work.");
+}
+
+var ss = (function(math, undefined) {
     "use strict";
 
     // Set up global object to return into the ss object
     var globalObject = function(json) {
-        if (typeof json === "undefined") return "Error: need a file argument.";
+        if (typeof json === "undefined") return "Error: need a non-empty file argument.";
         return new jsonData(json);
     };
 
@@ -55,6 +61,19 @@ var ss = (function(undefined) {
     };
 
     /**
+     * Simple function built to check if a number is positive
+     * 
+     * @param Number number
+     */
+    var isPositive = function(number) {
+        if (number >= 0) {
+            return true;
+        }
+
+        return false;
+    };
+
+    /**
      * Sorts a json array based on provided column if the provided column is populated by numbers
      * Preserves the original array by forcing a copy of the array to be made before sorting (not sure if I need this anymore, seems processor expensive)
      *
@@ -68,9 +87,26 @@ var ss = (function(undefined) {
         }
     };
 
-    /*============================*
-     * Statistics Library Section *
-     *============================*/
+    /**
+     * Takes an array of errors and prints them to console and stores them in the global error array (globalObject.errors)
+     * 
+     * @param Array errorArray
+     */
+    var storeAndDisplayErrors = function(errorArray) {
+        // Must have an array
+        if (errorArray instanceof Array) {
+            
+            // Go through array and print errors to console and put in global error array (globalObject.errors)
+            for (var i = 0; i < errorArray.length; i++) {
+                console.error(errorArray[i]);
+                globalObject.errors.push(errorArray[i]);
+            }
+        }
+    };
+
+    /*========================*
+     * Descriptive Statistics *
+     *========================*/
 
      /**
       * Class for creating objects that hold JSON
@@ -204,23 +240,6 @@ var ss = (function(undefined) {
 
         // Default return
         return validationReport;
-    };
-
-    /**
-     * Takes an array of errors and prints them to console and stores them in the global error array (globalObject.errors)
-     * 
-     * @param Array errorArray
-     */
-    var storeAndDisplayErrors = function(errorArray) {
-        // Must have an array
-        if (errorArray instanceof Array) {
-            
-            // Go through array and print errors to console and put in global error array (globalObject.errors)
-            for (var i = 0; i < errorArray.length; i++) {
-                console.error(errorArray[i]);
-                globalObject.errors.push(errorArray[i]);
-            }
-        }
     };
 
     /**
@@ -974,5 +993,149 @@ var ss = (function(undefined) {
         return stdev(this.json, column, filterCb);
     };
 
+    /*===============*
+     * Distributions *
+     *===============*/
+
+    /**
+     * Performs the actual calculation for the binomial distribution
+     * Based on formula --> (n choose k)(p^k)(q^(n-k))
+     * NOTE: abstracted function is due to mathjs library using math.format() to output a human-readable answer
+     * 
+     * @param Integer successes
+     * @param Integer trials
+     * @param Float probability
+     */
+    var binomDistCalc = function(successes, trials, probability) {
+        // Make everything a big number for use in massive factorial calculations
+        successes = math.bignumber(successes);
+        trials = math.bignumber(trials);
+        probability = math.bignumber(probability);
+
+        // Special case where combinatorics will come out to 1 and does not need to be calculated
+        if (successes === 0 || successes === trials) {
+            return math.multiply(math.pow(probability, successes), math.pow(math.subtract(1, probability), math.subtract(trials, successes)));
+        
+        // Not the special case, brute calculation
+        } else {
+            // Combinatorics calculation
+            var successesFact = math.factorial(successes);
+            var trialsFact = math.factorial(trials);
+            var differenceFact = math.factorial(math.subtract(trials, successes));
+            var combinations = math.divide(trialsFact, math.multiply(successesFact, differenceFact));
+
+            // probability calculation
+            var probPow = math.pow(probability, successes);
+            var complementProbPow = math.pow(math.subtract(1, probability), math.subtract(trials, successes));
+            var combinedProb = math.multiply(probPow, complementProbPow);
+
+            // return final calculation, which is the answer
+            return math.multiply(combinations, combinedProb);
+        }
+    };
+
+    /**
+     * Calculates the probability of k number of successes in n number of trials based on a binomial distribution
+     * 
+     * @param Integer successes
+     * @param Integer trials
+     * @param Float probability
+     * @param Boolen cumulative
+     */
+    globalObject.binomdist = function(successes, trials, probability, cumulative) {
+        cumulative = typeof cumulative === "undefined" ? false: cumulative;
+        
+        var errors = [],                 // error array for error reporting
+            total = math.bignumber(0);   // total probability
+
+        // Sanitizing input
+        if (!isInt(successes)) errors.push("The number of successes must be an integer (" + successes + ")");
+        if (!isPositive(successes)) errors.push("The number of successes must be a positive integer (" + successes + ")");
+        if (!isInt(trials)) errors.push("The number of trials must be an integer (" + trials + ")");
+        if (!isPositive(trials)) errors.push("The number of trials must be a positive integer (" + trials + ")");
+        if (successes > trials) errors.push("It is impossible to have more successes than trials, in both life and statistics...");
+        if (probability > 1 || probability < 0) errors.push("The probability of a success must be between 0 and 1 (" + probability + ")");
+
+        if (errors.length > 0) {
+            storeAndDisplayErrors(errors);
+            return undefined;
+        }
+
+        // No cumulative distribution
+        if (cumulative === false) {
+            return math.format(binomDistCalc(successes, trials, probability));
+        
+        // User asked for cumulative distribution
+        } else {
+
+            // Loop through current number of successes and all smaller number of successes and add probabilities together
+            // for cumulative probability
+            for (successes; successes >= 0; successes--) {
+                total = math.add(total, binomDistCalc(successes, trials, probability));
+            }
+            return math.format(total);
+        }
+    };
+
+    /**
+     * Performs the actual calculation for the poisson distribution
+     * Based on the formula ((e^-mu)*(mu^k))/k!
+     * 
+     * @param Int successes
+     * @param Float avgSuccesses
+     */
+    var poissonDistCalc = function(successes, avgSuccesses) {
+        // Change all inputs to bignumbers for working with factorials
+        successes = math.bignumber(successes);
+        var negativeAvgSuccesses = math.bignumber(-avgSuccesses);
+        avgSuccesses = math.bignumber(avgSuccesses);
+
+        // Calculate numerator and denominator of the equation
+        var numerator = math.multiply(math.pow(math.bignumber(math.e), negativeAvgSuccesses), math.pow(avgSuccesses, successes));
+        var denominator = math.factorial(successes);
+
+        return math.divide(numerator, denominator);
+    };
+
+    /**
+     * Calculates the probability of k number of successes in a given time frame t with an average number of 
+     * successes mu in time frame t
+     * 
+     * @param Int successes
+     * @param Float avgSuccesses
+     * @param Boolean cumulative
+     */
+    globalObject.poissondist = function(successes, avgSuccesses, cumulative) {
+        cumulative = typeof cumulative === "undefined" ? false: cumulative;
+        
+        var errors = [],                 // error array for error reporting
+            total = math.bignumber(0);   // total probability
+
+        // Sanitizing input
+        if (!isInt(successes)) errors.push("The number of successes must be an integer (" + successes + ")");
+        if (!isPositive(successes)) errors.push("The number of successes must be a positive integer (" + successes + ")");
+        if (!isPositive(avgSuccesses)) errors.push("The average number of successes must be a positive number (" + avgSuccesses + ")");
+
+        if (errors.length > 0) {
+            storeAndDisplayErrors(errors);
+            return undefined;
+        }
+
+        // No cumulative distribution
+        if (cumulative === false) {
+            return math.format(poissonDistCalc(successes, avgSuccesses));
+        
+        // User asked for cumulative distribution
+        } else {
+
+            // Loop through current number of successes and all smaller number of successes and add probabilities together
+            // for cumulative probability
+            for (successes; successes >= 0; successes--) {
+                total = math.add(total, poissonDistCalc(successes, avgSuccesses));
+            }
+            return math.format(total);
+        }
+    };
+
     return globalObject;
-})();
+})(math);
