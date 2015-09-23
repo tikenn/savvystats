@@ -21,8 +21,10 @@ var ss = (function(math, undefined) {
     "use strict";
 
     // Set up global object to return into the ss object
-    var globalObject = function(json) {
-        if (typeof json === "undefined") return "Error: need a non-empty file argument.";
+    var globalObject = function(file, delimiter) {
+        if (typeof file === "undefined") throw new Error("Need a non-empty file argument.");
+        var json = fileParser(file, delimiter);
+
         return new jsonData(json);
     };
 
@@ -104,6 +106,104 @@ var ss = (function(math, undefined) {
         }
     };
 
+    /**
+     * Parses CSV and TSV file for loading into the ss object
+     * Allows ss(file).math_function to be used for any file
+     * 
+     * @param String file
+     * @param String fileType
+     */
+    var fileParser = function(file, delimiter) {
+        // Non-denoted delimiter will assume "," (to fix later)
+        delimiter = typeof delimiter === "undefined" ? "," : delimiter;
+
+        // Variable to store file in
+        var fileJson = [];
+
+        // Array of objects listing errors for graceful errors
+        var errors = [];
+
+        if (delimiter !== "," && delimiter !=="\t") {
+            throw new Error("Only CSV and TSV file types can be parsed");
+            return undefined;
+        }
+
+        // Function shamelessly stolen from PapaParse (mholt | http://papaparse.com) and modified
+        function guessLineEndings(input) {
+            input = input.substr(0, 1024*1024); // max length 1 MB
+
+            var r = input.split("\r");
+
+            if (r.length == 1) {
+                var n = input.split("\n");
+                if (n.length > 1) {
+                    return "\n";
+                } else {
+                    // file has no line endings and is only one line
+                    return undefined;
+                }
+            }
+
+            var numWithN = 0;
+            for (var i = 0; i < r.length; i++) {
+                if (r[i][0] == "\n")
+                    numWithN++;
+            }
+
+            return numWithN >= r.length / 2 ? "\r\n" : "\r";
+        }
+
+        var lineEnding;
+        if (lineEnding = guessLineEndings(file)) {
+            var dataLines = file.split(lineEnding);
+        } else {
+            throw new Error("File provided has no line endings");
+        }
+
+        for (var i = 0; i < dataLines.length; i++) {
+            var dataFields = dataLines[i].split(delimiter);
+            // Set headers and keep moving
+            if (i == 0) {
+                var dataHeaders = dataFields;
+                continue;
+            }
+
+            // Don't fill with garbage data
+            if (dataLines[i] == "") {
+                errors.push({
+                    "function": "fileParser",
+                    "process": "Parsing file lines",
+                    "message": "No data present in the indicated line, skipping",
+                    "row": i
+                });
+                continue;
+            }
+
+            // object to hold data for each line
+            var lineObject = {};
+            for (var j = 0; j < dataFields.length; j++) {
+                if (typeof dataHeaders[j] !== "undefined") {
+                    lineObject[dataHeaders[j]] = dataFields[j];
+                } else {
+                    errors.push({
+                        "function": "fileParser",
+                        "process": "Parsing data fields",
+                        "message": "Fields exceeded expected number based on headers, skipping",
+                        "row": i
+                    });
+                }
+            }
+
+            // Add each object to json array of file
+            fileJson.push(lineObject);
+        }
+
+        // Attach error to jsonData prototype for viewing of file errors
+        jsonData.prototype.errors = errors;
+
+        return fileJson;
+    }
+
     /*========================*
      * Descriptive Statistics *
      *========================*/
@@ -157,31 +257,26 @@ var ss = (function(math, undefined) {
     var validateJson = function(json, column, filterCb) {
         // Error collection object
         var validationReport = {};
-        validationReport.error = false;
-        validationReport.errors = [];
         validationReport.validJson = [];
         validationReport.count = 0;
 
-        // Prevent rechecking and multiple errors
-        var typeErrorColumns = [];      // keeps track of columns that don't exist
-        var numberErrorColumns = [];    // keeps track of columns that don't have numbers in them
+        // In case multiple errors need to be thrown
+        var errors = [];
 
         // -- Validating all input --
         // Make sure json is actually an array
         if (!(json instanceof Array)) {
-            validationReport.error = true;
-            validationReport.errors.push("Data must be in a JSON format starting with an array");
+            errors.push("Data must be in a JSON format starting with an array");
         }
 
         // Insure that column passed is a string
         if (typeof column !== "string") {
-            validationReport.error = true;
-            validationReport.errors.push("All columns must be passed as strings: " + arguments[i] + ".")
+            errors.push("The column name must be passed as strings: " + column + ".")
         }
 
         // One of the inputs failed initial validation, no need to go further
         if (validationReport.error) {
-            return validationReport;
+            throw new Error(errors.join("; "));
         }
 
         // -- Validating the parts of the JSON data --
@@ -189,23 +284,17 @@ var ss = (function(math, undefined) {
             // Making sure the array components are objects (note: arrays are considered to be instances of objects, so have to 
             // specificall exclude arrays)
             if (!(json[i] instanceof Object) || (json[i] instanceof Array)) {
-                validationReport.error = true;
-                validationReport.errors.push("The JSON array must be filled with objects");
-                return validationReport;
+                throw new Error("The JSON array must be filled with objects");
             }
 
             // Column argument must be a property of every JSON object
             if (!json[i].hasOwnProperty(column)) {
-                validationReport.error = true;
-                validationReport.errors.push("The column " + column + " does not exist; or, if you're sure it does, the json might be broken. Verify the JSON before continuing.");
-                return validationReport;
+                throw new Error("The column " + column + " does not exist; or, if you're sure it does, the json might be broken. Verify the JSON before continuing.");
             }
 
             // column property argument listed must only consist of numbers
             if (isNaN(json[i][column])) {
-                validationReport.error = true;
-                validationReport.errors.push("The column " + column + " does not contain only numbers and has to for this operation.");
-                return validationReport;
+                throw new Error("The column " + column + " does not contain only numbers and has to for this operation.");
             }
 
             // filter array (put this in after documentation, simply need to pass validationReport.validJson to "new ValidJson" instead of the original json argument for each function)
@@ -214,20 +303,24 @@ var ss = (function(math, undefined) {
             // If a callback has been used (argument in filterCb) and is a callback function, filter data
             if (filterCb && typeof filterCb === "function") {
                 
-                // If the callback succeeds (the data meets the filter criteria set by the callback function)
-                // Note, this is the most trippy function I have every written in javascript
-                if (filterCb(json[i]) === true) {
+                // callback must return true or false
+                if (filterCb(json[i]) === true || filterCb(json[i]) === false) {
                     
-                    // Add that object to a new JSON array for returning, this is the json array that should be considered valid
-                    validationReport.validJson.push(json[i]);
-                    validationReport.count++;
+                    // If the callback succeeds (the data meets the filter criteria set by the callback function)
+                    // Note, this is the most trippy function I have every written in javascript
+                    if (filterCb(json[i]) === true) {
+                        
+                        // Add that object to a new JSON array for returning, this is the json array that should be considered valid
+                        validationReport.validJson.push(json[i]);
+                        validationReport.count++;
+                    }
+                } else {
+                    throw new Error("The function " + filterCb + " must return either true or false.");
                 }
 
             // If a callback has been used but is not a function, return error
             } else if (filterCb && typeof filterCb !== "function") {
-                validationReport.error = true;
-                validationReport.errors.push("The function " + filterCb + " is not a function or is improperly formed.");
-                return validationReport;
+                throw new Error("The function " + filterCb + " is not a function or is improperly formed.");
             }
         }
 
@@ -257,46 +350,38 @@ var ss = (function(math, undefined) {
     var sum = function(json, column, filterCb) {
         // Holds the total that is returned if the function is successful
         var total = 0,
-            error = [];
+            errors = [];
 
         // Is json an array in the first place
         if (!(json instanceof Array)) {
-            error.push("Data must be passed as a JSON array starting with an array");
+            errors.push("Data must be passed as a JSON array starting with an array");
         }
 
         // Is the column appropriate to be passed as the name of an object property
         if (typeof column !== "string") {
-            error.push("The column must be provided as a string");
+            errors.push("The column must be provided as a string");
         }
 
         // Grab errors and print
-        if (error.length > 0) {
-            console.error(error);
-            globalObject.errors.push(error);
-            return undefined;
+        if (errors.length > 0) {
+            throw new Error(errors.join("; "));
         }
 
         // Begin going through JSON array
         for (var i = 0; i < json.length; i++) {
             // Does the JSON array contain objects
             if (!(json[i] instanceof Object)) {
-                console.error("The JSON array must be filled with objects");
-                globalObject.errors.push("The JSON array must be filled with objects");
-                return undefined;
+                throw new Error("The JSON array must be filled with objects");
             }
 
             // Do the objects have the property passed in the column param
             if (!json[i].hasOwnProperty(column)) {
-                console.error("The column selected does not exist, or, if you're sure it does, the json might be broken.  Verify the JSON before continuing.");
-                globalObject.errors.push("The column selected does not exist, or, if you're sure it does, the json might be broken.  Verify the JSON before continuing.");
-                return undefined;
+                throw new Error("The column selected does not exist, or, if you're sure it does, the json might be broken.  Verify the JSON before continuing.");
             }
 
             // Are values in the column param property numbers
             if (isNaN(json[i][column])) {
-                console.error("All values of the chosen column must be numbers for the summmation");
-                globalObject.errors.push("All values of the chosen column must be numbers for the summmation");
-                return undefined;
+                throw new Error("All values of the chosen column must be numbers for the summmation");
             }
 
             // Use filter if it exists
@@ -339,18 +424,16 @@ var ss = (function(math, undefined) {
         } else {
 
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
                 return sumOfSquares(validJson, column, filterCb);
             
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
         }
     };
@@ -366,23 +449,21 @@ var ss = (function(math, undefined) {
      */
     var logtrans = function(json, column) {
         // set up something to catch errors
-        var error = [];
+        var errors = [];
 
         // Is json an array in the first place
         if (!(json instanceof Array)) {
-            error.push("Data must be passed as a JSON array starting with an array");
+            errors.push("Data must be passed as a JSON array starting with an array");
         }
 
         // Is the column appropriate to be passed as the name of an object property
         if (typeof column !== "string") {
-            error.push("The column must be provided as a string");
+            errors.push("The column must be provided as a string");
         }
 
         // Grab errors and print
-        if (error.length > 0) {
-            console.error(error);
-            globalObject.errors.push(error);
-            return undefined;
+        if (errors.length > 0) {
+            throw new Error(errors.join("; "));
         }
 
         // Copy json array so that the original data is not affected
@@ -392,23 +473,17 @@ var ss = (function(math, undefined) {
         for (var i = 0; i < transformedJson.length; i++) {
             // Does the JSON array contain objects
             if (!(json[i] instanceof Object)) {
-                console.error("The JSON array must be filled with objects");
-                globalObject.errors.push("The JSON array must be filled with objects");
-                return undefined;
+                throw new Error("The JSON array must be filled with objects");
             }
 
             // Do the objects have the property passed in the column param
             if (!transformedJson[i].hasOwnProperty(column)) {
-                console.error("The column selected does not exist, or, if you're sure it does, the json might be broken.  Verify the JSON before continuing.");
-                globalObject.errors.push("The column selected does not exist, or, if you're sure it does, the json might be broken.  Verify the JSON before continuing.");
-                return undefined;
+                throw new Error("The column selected does not exist, or, if you're sure it does, the json might be broken.  Verify the JSON before continuing.");
             }
 
             // Are values in the column param property numbers
             if (isNaN(transformedJson[i][column])) {
-                console.error("All values of the chosen column must be numbers for the logarithm transformation");
-                globalObject.errors.push("All values of the chosen column must be numbers for the logarithm transformation");
-                return undefined;
+                throw new Error("All values of the chosen column must be numbers for the logarithm transformation");
             }
 
             // Log transform the specified column in the JSON data
@@ -445,18 +520,14 @@ var ss = (function(math, undefined) {
         } else {
 
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
                 return min(validJson, column, filterCb);
-            
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
         }
     };
@@ -488,18 +559,16 @@ var ss = (function(math, undefined) {
         } else {
 
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
                 return max(validJson, column, filterCb);
             
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
         }
     };
@@ -531,20 +600,18 @@ var ss = (function(math, undefined) {
         } else {
 
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
                 return range(validJson, column, filterCb);
             
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
-        }
+         }
     };
 
     // Add range to prototype for easy access
@@ -574,18 +641,16 @@ var ss = (function(math, undefined) {
         } else {
 
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
                 return mean(validJson, column, filterCb);
             
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
         }
     };
@@ -616,19 +681,18 @@ var ss = (function(math, undefined) {
         // Data has not been validated
         } else {
 
+
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
                 return geomean(validJson, column, filterCb);
             
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
         }
     };
@@ -687,25 +751,23 @@ var ss = (function(math, undefined) {
 
             // k was not a number or it was not in the range
             } else {
-                console.error("The kth percentile must be a number between 1 and 100: " + k);
-                globalObject.errors.push("The kth percentile must be a number between 1 and 100: " + k);
+                throw new Error("The kth percentile must be a number between 1 and 100: " + k);
             }
         // Data has not been validated
         } else {
 
+
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
                 return percentile(k, validJson, column, filterCb);
             
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
         }
     };
@@ -739,18 +801,16 @@ var ss = (function(math, undefined) {
         } else {
 
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
                 return median(validJson, column, filterCb);
             
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
         }
     };
@@ -788,26 +848,24 @@ var ss = (function(math, undefined) {
             } else if (type === 4) {
                 return percentile(100, json.validJson, column, filterCb);
             } else {
-                console.error(type + " is not a quartile. Appropriate quartiles are 1, 2, 3, 4");
-                globalObject.errors.push(type + " is not a quartile. Appropriate quartiles are 1, 2, 3, 4");
+                throw new Error(type + " is not a quartile. Appropriate quartiles are 1, 2, 3, 4");
             }
 
        // Data has not been validated
         } else {
 
+
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
                 return quartile(type, validJson, column, filterCb);
             
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
         }
     };
@@ -885,19 +943,18 @@ var ss = (function(math, undefined) {
        // Data has not been validated
         } else {
 
+
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
                 return mode(validJson, column, filterCb);
             
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
         }
     };
@@ -929,19 +986,18 @@ var ss = (function(math, undefined) {
         // Data has not been validated
         } else {
 
+
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
-                return variance(validJson, column, filterCb);
+                return mode(validJson, column, filterCb);
             
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
         }
     };
@@ -972,18 +1028,16 @@ var ss = (function(math, undefined) {
         } else {
 
             // Attempt to validate... everything!!!
-            var validationReport = validateJson(json, column, filterCb);
-            
-            // If validated, move json to ValidJson for type hinting
-            if (!validationReport.error) {
+            try {
+                var validationReport = validateJson(json, column, filterCb);
                 var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                
-                // Recursively call function again as json is now valid and will pass the first if statement
                 return stdev(validJson, column, filterCb);
             
-            // JSON is not valid, display errors
-            } else {
-                storeAndDisplayErrors(validationReport.errors);
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
             }
         }
     };
@@ -993,45 +1047,78 @@ var ss = (function(math, undefined) {
         return stdev(this.json, column, filterCb);
     };
 
-    /*===============*
-     * Distributions *
-     *===============*/
+    /*=================================*
+     * Probabilities and Distributions *
+     * ------------------------------- *
+     * Note: section depends heavily   *
+     * on mathjs package               *
+     *=================================*/
 
     /**
-     * Performs the actual calculation for the binomial distribution
-     * Based on formula --> (n choose k)(p^k)(q^(n-k))
-     * NOTE: abstracted function is due to mathjs library using math.format() to output a human-readable answer
-     * 
-     * @param Integer successes
-     * @param Integer trials
-     * @param Float probability
+     * Calculates the permutations of k objects chosen from n
+     * In other words, choose k from n where the order of k matters
+     * Based on the function (n!)/((n-k)!)
+     *
+     * @param Integer n
+     * @param Integer k
      */
-    var binomDistCalc = function(successes, trials, probability) {
-        // Make everything a big number for use in massive factorial calculations
-        successes = math.bignumber(successes);
-        trials = math.bignumber(trials);
-        probability = math.bignumber(probability);
+    globalObject.permutations = function(n, k) {
+        var errors = [];
 
-        // Special case where combinatorics will come out to 1 and does not need to be calculated
-        if (successes === 0 || successes === trials) {
-            return math.multiply(math.pow(probability, successes), math.pow(math.subtract(1, probability), math.subtract(trials, successes)));
-        
-        // Not the special case, brute calculation
-        } else {
-            // Combinatorics calculation
-            var successesFact = math.factorial(successes);
-            var trialsFact = math.factorial(trials);
-            var differenceFact = math.factorial(math.subtract(trials, successes));
-            var combinations = math.divide(trialsFact, math.multiply(successesFact, differenceFact));
+        // transfer everything to math.bignumbers for factorial calculations
+        n = math.bignumber(n);
+        k = math.bignumber(k);
 
-            // probability calculation
-            var probPow = math.pow(probability, successes);
-            var complementProbPow = math.pow(math.subtract(1, probability), math.subtract(trials, successes));
-            var combinedProb = math.multiply(probPow, complementProbPow);
+        // Input sanitization
+        if (!math.isInteger(n))
+            errors.push("Permutation: The total number n from which k items are being chosen must be an integer: " + math.format(n));
 
-            // return final calculation, which is the answer
-            return math.multiply(combinations, combinedProb);
+        if (!math.isInteger(k))
+            errors.push("Permutation: The number of k items to be chosen from n items must be an integer: " + math.format(k));
+
+        if (math.larger(k, n))
+            errors.push("Permutation: n must be greater than or equal to k: " + n + " < " + k);
+
+        if (errors.length > 0) {
+            throw new Error(errors.join("; "));
+            return undefined;
         }
+
+        var numerator = math.factorial(n);
+        var denominator = math.factorial(math.subtract(n,k));
+
+        return math.format(math.divide(numerator, denominator));
+    };
+
+    /**
+     * Calculates the combinations of k objects chosen from n
+     * In other words, choose k from n where the order of k doesn't matter
+     * Based on the function (n choose k) or (n!)/(k!(n-k)!)
+     *
+     * @param Integer n
+     * @param Integer k
+     */
+    globalObject.combinations = function(n, k) {
+        var errors = [];
+
+        // transfer everything to math.bignumbers for factorial calculations
+        n = math.bignumber(n);
+        k = math.bignumber(k);
+
+        // Input sanitization
+        if (!math.isInteger(n))
+            errors.push("Permutation: The total number n from which k items are being chosen must be an integer: " + math.format(n));
+
+        if (!math.isInteger(k))
+            errors.push("Permutation: The number of k items to be chosen from n items must be an integer: " + math.format(k));
+
+        if (math.larger(k, n))
+            errors.push("Permutation: n must be greater than or equal to k: " + n + " < " + k);
+
+        var numerator = math.bignumber(globalObject.permutations(n, k));
+        var denominator = math.factorial(k);
+
+        return math.format(math.divide(numerator, denominator));
     };
 
     /**
@@ -1049,17 +1136,58 @@ var ss = (function(math, undefined) {
             total = math.bignumber(0);   // total probability
 
         // Sanitizing input
-        if (!isInt(successes)) errors.push("The number of successes must be an integer (" + successes + ")");
-        if (!isPositive(successes)) errors.push("The number of successes must be a positive integer (" + successes + ")");
-        if (!isInt(trials)) errors.push("The number of trials must be an integer (" + trials + ")");
-        if (!isPositive(trials)) errors.push("The number of trials must be a positive integer (" + trials + ")");
-        if (successes > trials) errors.push("It is impossible to have more successes than trials, in both life and statistics...");
-        if (probability > 1 || probability < 0) errors.push("The probability of a success must be between 0 and 1 (" + probability + ")");
+        if (!isInt(successes))
+            errors.push("The number of successes must be an integer (" + successes + ")");
+
+        if (!isPositive(successes))
+            errors.push("The number of successes must be a positive integer (" + successes + ")");
+
+        if (!isInt(trials))
+            errors.push("The number of trials must be an integer (" + trials + ")");
+
+        if (!isPositive(trials))
+            errors.push("The number of trials must be a positive integer (" + trials + ")");
+
+        if (successes > trials)
+            errors.push("It is impossible to have more successes than trials, in both life and statistics...");
+
+        if (typeof probability === "undefined")
+            error.push("A probability of success must be provided");
+
+        if (probability > 1 || probability < 0)
+            errors.push("The probability of a success must be between 0 and 1 (" + probability + ")");
 
         if (errors.length > 0) {
-            storeAndDisplayErrors(errors);
-            return undefined;
+            throw new Error(errors.join("; "));
         }
+
+        // function to perform the actual calculation
+        // Based on the function (n choose k)(p^k)(q^(n-k))
+        var binomDistCalc = function(successes, trials, probability) {
+            // Make everything a big number for use in massive factorial calculations
+            successes = math.bignumber(successes);
+            trials = math.bignumber(trials);
+            probability = math.bignumber(probability);
+
+            // Special case where combinatorics will come out to 1 and does not need to be calculated
+            if (successes === 0 || successes === trials) {
+                return math.multiply(math.pow(probability, successes), math.pow(math.subtract(1, probability), math.subtract(trials, successes)));
+            
+            // Not the special case, brute calculation
+            } else {
+                // Combinatorics calculation
+                var combinations = math.bignumber(globalObject.combinations(trials, successes));
+
+                // probability calculation
+                var probPow = math.pow(probability, successes);
+                var complementProbPow = math.pow(math.subtract(1, probability), math.subtract(trials, successes));
+                var combinedProb = math.multiply(probPow, complementProbPow);
+
+                // return final calculation, which is the answer
+                return math.multiply(combinations, combinedProb);
+            }
+        };
+
 
         // No cumulative distribution
         if (cumulative === false) {
@@ -1077,25 +1205,6 @@ var ss = (function(math, undefined) {
         }
     };
 
-    /**
-     * Performs the actual calculation for the poisson distribution
-     * Based on the formula ((e^-mu)*(mu^k))/k!
-     * 
-     * @param Int successes
-     * @param Float avgSuccesses
-     */
-    var poissonDistCalc = function(successes, avgSuccesses) {
-        // Change all inputs to bignumbers for working with factorials
-        successes = math.bignumber(successes);
-        var negativeAvgSuccesses = math.bignumber(-avgSuccesses);
-        avgSuccesses = math.bignumber(avgSuccesses);
-
-        // Calculate numerator and denominator of the equation
-        var numerator = math.multiply(math.pow(math.bignumber(math.e), negativeAvgSuccesses), math.pow(avgSuccesses, successes));
-        var denominator = math.factorial(successes);
-
-        return math.divide(numerator, denominator);
-    };
 
     /**
      * Calculates the probability of k number of successes in a given time frame t with an average number of 
@@ -1112,14 +1221,33 @@ var ss = (function(math, undefined) {
             total = math.bignumber(0);   // total probability
 
         // Sanitizing input
-        if (!isInt(successes)) errors.push("The number of successes must be an integer (" + successes + ")");
-        if (!isPositive(successes)) errors.push("The number of successes must be a positive integer (" + successes + ")");
-        if (!isPositive(avgSuccesses)) errors.push("The average number of successes must be a positive number (" + avgSuccesses + ")");
+        if (!isInt(successes))
+            errors.push("The number of successes must be an integer (" + successes + ")");
+
+        if (!isPositive(successes))
+            errors.push("The number of successes must be a positive integer (" + successes + ")");
+
+        if (!isPositive(avgSuccesses))
+            errors.push("The average number of successes must be a positive number (" + avgSuccesses + ")");
 
         if (errors.length > 0) {
-            storeAndDisplayErrors(errors);
-            return undefined;
+            throw new Error(errors.join("; "));
         }
+
+        // Performs actual calculation
+        // Based on the formula ((e^-mu)*(mu^k))/k!
+        var poissonDistCalc = function(successes, avgSuccesses) {
+            // Change all inputs to bignumbers for working with factorials
+            successes = math.bignumber(successes);
+            var negativeAvgSuccesses = math.bignumber(-avgSuccesses);
+            avgSuccesses = math.bignumber(avgSuccesses);
+
+            // Calculate numerator and denominator of the equation
+            var numerator = math.multiply(math.pow(math.bignumber(math.e), negativeAvgSuccesses), math.pow(avgSuccesses, successes));
+            var denominator = math.factorial(successes);
+
+            return math.divide(numerator, denominator);
+        };
 
         // No cumulative distribution
         if (cumulative === false) {
@@ -1136,6 +1264,198 @@ var ss = (function(math, undefined) {
             return math.format(total);
         }
     };
+
+    /**
+     * Calculates the probability of getting the value x in an observation or the probability of x and anything less (cumulative)
+     * Based on the formula (1/(sigma*sqrt(2*pi)))*e^((-1/(2*sigma^2))*(x-mu)^2)
+     * Integration of the above function results in the cumulative distribution function
+     *
+     * See https://en.wikipedia.org/wiki/Normal_distribution#Cumulative_distribution_function and 
+     *      https://en.wikipedia.org/wiki/Error_function for how this works
+     * 
+     * @param Float x
+     * @param Float mean
+     * @param Float stdev
+     * @param Boolean cumulative (optional)
+     */
+    globalObject.normdist = function(x, mean, stdev, cumulative) {
+        cumulative = typeof cumulative === "undefined" ? true : cumulative;
+        var errors = [];
+
+        // Sanitize the data
+        if (isNaN(x)) {
+            errors.push("normdist: the x value " + x + " is not a number");
+        }
+
+        if (isNaN(mean)) {
+            errors.push("normdist: the mean " + mean + " is not a number");
+        }
+
+        if (isNaN(stdev)) {
+            errors.push("normdist: the standard deviation " + stdev + " is not a number");
+        }
+
+        if(errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        // Integrate the pmf of the normal distribution
+        if (cumulative === true) {
+            // based on integration of normal distribution probability mass function
+            var errorFuncInput = ((x-mean)/stdev)/Math.sqrt(2),
+                value = errorFuncInput,
+                sum = errorFuncInput,
+                prob;
+
+            // Summing first 10 terms of error function Taylor series (sum from(n = 0) to(infinity) (((-1)^n)*z^(2n+1))/(n!(2n+1)))
+            for (var n = 1; n < 16; n++) {
+                // Change the previous term in the sum to the current term by multiplying the previous value by the change
+                value *= (-1 * Math.pow(errorFuncInput, 2) * (2*n - 1))/(n * (2*n + 1));
+                sum += value;
+            }
+
+            // Error function value of cumulative probability distribution
+            var errorFunction = 2 / Math.sqrt(Math.PI) * sum;
+
+            // cumulative probability
+            prob = 1 / 2 * (1 + errorFunction);
+
+        // Probability based on pmf of normal distribution
+        } else {
+            prob = (1 / (stdev * Math.sqrt(2 * Math.PI))) * Math.pow(Math.E, (-1 / (2 * Math.pow(stdev, 2)) * Math.pow((x - mean), 2)));
+        }
+
+        return prob;
+    };
+
+    /**
+     * Calculates the smallest x value that will give a cumulative probability equal to user input
+     * Function provided by adussaq (https://github.com/adussaq)
+     * 
+     * @param Float prob
+     * @param Float mean
+     * @param Float stdev
+     */
+    globalObject.norminv = function(prob, mean, stdev) {
+        var errors = [];
+
+        // Sanitize the data
+        if (isNaN(prob)) {
+            errors.push("normdist: the x value " + x + " is not a number");
+        }
+
+        if (prob > 1 || prob < 0) {
+            errors.push("normdist: the probability " + prob + " should be between 0 and 1 including the bounds");
+        }
+
+        if (isNaN(mean)) {
+            errors.push("normdist: the mean " + mean + " is not a number");
+        }
+
+        if (isNaN(stdev)) {
+            errors.push("normdist: the standard deviation " + stdev + " is not a number");
+        }
+
+        if(errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        var z,                  // value for standard normal distribution (mean = 0, stdev = 1)
+            diff,               // difference between guessed probability and user submitted probability
+            error = 1e-10,      // allowed error between guessed probability and user submitted probability
+            maxIter = 1000,     // after 1000 iterations, it's close enough
+            step = 0.25,        // gives faster convergence on diff
+            stepInc = 1.2,      // increase step to converge faster
+            stepDec = 0.5,      // decreases step for after overshoot
+            iter = 0,           // counts number of iterations
+            direction = 1,      // determines direction of alternation
+            lastDiff = 1;       // used to calculate overshooting
+
+        // Make some intelligent guesses based on knowing that, for a standard normal distribution,
+        // a probability < 0.5 must be from a negative z and a probability > 0.5 must be from a positive z
+        if (prob < 0.5) {
+            z = -0.5;
+        } else if (prob > 0.5) {
+            z = 0.5;
+        } else {
+            z = 0;
+        }
+
+        // Guess until gone for too many iterations or arrived within error
+        do {
+            // Check the guess
+            diff = prob - globalObject.normdist(z, 0, 1, true);
+
+            // Change direction on number line based on whether still above or below actual value
+            if (diff > 0) {
+                direction = 1;
+            } else if (diff < 0) {
+                direction = -1;
+            } else {
+                direction = 0;
+            }
+
+            // Increase step rate until overshoot
+            if (lastDiff * diff > 0) {
+                step *= stepInc;
+
+            // Decrease step rate immediately after overshooting to narrow in
+            } else {
+                step *= stepDec;
+            }
+
+            // create another guess
+            z += direction * step;
+
+            // save last diff to check for overshooting
+            lastDiff = diff;
+
+            // Maintain count of iterations thus far
+            iter++;
+        } while (Math.abs(diff) > error && iter < maxIter);
+
+        // return value back based on user-select normal distribution
+        //return [z * stdev + mean, globalObject.normdist(z, 0, 1, true), iter]; (for debugging)
+        return z * stdev + mean;
+    }
+
+    /**
+     * Calculates the x value such that P(-x < X < x) is equal to the provided user probability
+     * assuming a normal distribution
+     * 
+     * @param Float probability
+     * @param Float mean
+     * @param Float stdev
+     */
+    globalObject.normbetween = function(prob, mean, stdev) {
+        var errors = [];
+
+        // Sanitize the data
+        if (isNaN(prob)) {
+            errors.push("normdist: the x value " + x + " is not a number");
+        }
+
+        if (prob > 1 || prob < 0) {
+            errors.push("normdist: the probability " + prob + " should be between 0 and 1 including the bounds");
+        }
+
+        if (isNaN(mean)) {
+            errors.push("normdist: the mean " + mean + " is not a number");
+        }
+
+        if (isNaN(stdev)) {
+            errors.push("normdist: the standard deviation " + stdev + " is not a number");
+        }
+
+        if(errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        // Based on the fact that the normal distribution is symmetric and P(X < mu) = 0.5
+        var cumulativeProb = 0.5 + prob / 2;
+
+        return globalObject.norminv(cumulativeProb, mean, stdev);
+    }
 
     return globalObject;
 })(math);
