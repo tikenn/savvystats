@@ -1307,8 +1307,8 @@ var ss = (function(math, undefined) {
                 sum = errorFuncInput,
                 prob;
 
-            // Summing first 10 terms of error function Taylor series (sum from(n = 0) to(infinity) (((-1)^n)*z^(2n+1))/(n!(2n+1)))
-            for (var n = 1; n < 16; n++) {
+            // Summing first 1000 terms of error function Taylor series (sum from(n = 0) to(infinity) (((-1)^n)*z^(2n+1))/(n!(2n+1)))
+            for (var n = 1; n < 1001; n++) {
                 // Change the previous term in the sum to the current term by multiplying the previous value by the change
                 value *= (-1 * Math.pow(errorFuncInput, 2) * (2*n - 1))/(n * (2*n + 1));
                 sum += value;
@@ -1317,8 +1317,13 @@ var ss = (function(math, undefined) {
             // Error function value of cumulative probability distribution
             var errorFunction = 2 / Math.sqrt(Math.PI) * sum;
 
-            // cumulative probability
-            prob = 1 / 2 * (1 + errorFunction);
+            // handling javascript rounding problem
+            if (errorFunction > 1) {
+                prob = 1;
+            } else {
+                // cumulative probability
+                prob = 1 / 2 * (1 + errorFunction);
+            }
 
         // Probability based on pmf of normal distribution
         } else {
