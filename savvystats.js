@@ -12,6 +12,8 @@
  *  - math.js (https://github.com/josdejong/mathjs) Copyright (C) 2013-2015 Jos de Jong wjosdejong@gmail.com under the Apache 2.0 License
  */
 
+"use strict";
+
 // Require the mathjs Package
 if (typeof math === "undefined") {
     throw new Error("This package requires the math.js package (https://github.com/josdejong/mathjs) for some of its functions to work.");
@@ -27,8 +29,6 @@ var ss = (function(math, undefined) {
 
         return new jsonData(json);
     };
-
-    globalObject.errors = [];
 
     /*==========================*
      * Helper Functions Section *
@@ -90,23 +90,6 @@ var ss = (function(math, undefined) {
     };
 
     /**
-     * Takes an array of errors and prints them to console and stores them in the global error array (globalObject.errors)
-     * 
-     * @param Array errorArray
-     */
-    var storeAndDisplayErrors = function(errorArray) {
-        // Must have an array
-        if (errorArray instanceof Array) {
-            
-            // Go through array and print errors to console and put in global error array (globalObject.errors)
-            for (var i = 0; i < errorArray.length; i++) {
-                console.error(errorArray[i]);
-                globalObject.errors.push(errorArray[i]);
-            }
-        }
-    };
-
-    /**
      * Parses CSV and TSV file for loading into the ss object
      * Allows ss(file).math_function to be used for any file
      * 
@@ -125,7 +108,6 @@ var ss = (function(math, undefined) {
 
         if (delimiter !== "," && delimiter !=="\t") {
             throw new Error("Only CSV and TSV file types can be parsed");
-            return undefined;
         }
 
         // Function shamelessly stolen from PapaParse (mholt | http://papaparse.com) and modified
@@ -153,9 +135,12 @@ var ss = (function(math, undefined) {
             return numWithN >= r.length / 2 ? "\r\n" : "\r";
         }
 
-        var lineEnding;
+        var lineEnding,
+            dataLines,
+            dataHeaders;
+
         if (lineEnding = guessLineEndings(file)) {
-            var dataLines = file.split(lineEnding);
+            dataLines = file.split(lineEnding);
         } else {
             throw new Error("File provided has no line endings");
         }
@@ -163,13 +148,13 @@ var ss = (function(math, undefined) {
         for (var i = 0; i < dataLines.length; i++) {
             var dataFields = dataLines[i].split(delimiter);
             // Set headers and keep moving
-            if (i == 0) {
-                var dataHeaders = dataFields;
+            if (i === 0) {
+                dataHeaders = dataFields;
                 continue;
             }
 
             // Don't fill with garbage data
-            if (dataLines[i] == "") {
+            if (dataLines[i] === "") {
                 errors.push({
                     "function": "fileParser",
                     "process": "Parsing file lines",
@@ -202,22 +187,25 @@ var ss = (function(math, undefined) {
         jsonData.prototype.errors = errors;
 
         return fileJson;
-    }
+    };
 
-    /*========================*
-     * Descriptive Statistics *
-     *========================*/
+    /*=============================================*
+     * Descriptive Statistics or Sample Statistics *
+     *=============================================*/
 
-     /**
-      * Class for creating objects that hold JSON
-      * Allows addition of statistical functions to prototype for easy calculations
-      */
+    /**
+     * Class for creating objects that hold JSON
+     * Allows addition of statistical functions to prototype for easy calculations
+     */
     function jsonData(json) {
         var self = this;
         if (!(json instanceof Array)) {
             self.json = undefined;
         } else {
             self.json = json;
+
+            // This is a shameless hack to allow this to be exposed externally
+            jsonData.prototype.json = json;
         }
     }
 
@@ -271,7 +259,7 @@ var ss = (function(math, undefined) {
 
         // Insure that column passed is a string
         if (typeof column !== "string") {
-            errors.push("The column name must be passed as strings: " + column + ".")
+            errors.push("The column name must be passed as strings: " + column + ".");
         }
 
         // One of the inputs failed initial validation, no need to go further
@@ -619,7 +607,6 @@ var ss = (function(math, undefined) {
         return range(this.json, column, filterCb);
     };
 
-
     /**
      * Calculates the mean of a data set (column)
      * Data in column can be filtered with callback (filterCb)
@@ -700,6 +687,128 @@ var ss = (function(math, undefined) {
     // Allow easy access to geomean through prototype
     jsonData.prototype.geomean = function(column, filterCb) {
         return geomean(this.json, column, filterCb);
+    };
+
+    /**
+     * Calculates the variance of a data set (column)
+     * Data in column can be filtered with callback (filterCb)
+     * 
+     * @param (JSON array) json
+     * @param String column
+     * @param function filterCb
+     *     takes an object in the JSON array as an argument
+     *     should return true or false
+     *     used to filter values in column used for calculation based on values in the same column or other columns
+     *     e.g. function(data) {data.column == "value";}
+     */
+    var variance = function(json, column, filterCb) {
+        // If JSON has already been validated, crunch numbers
+        if (json instanceof ValidJson) {
+            
+            // Filter count if needed
+            return sumOfSquares(json, column, filterCb)/(json.count - 1);
+
+        // Data has not been validated
+        } else {
+
+
+            // Attempt to validate... everything!!!
+            try {
+                var validationReport = validateJson(json, column, filterCb);
+                var validJson = new ValidJson(validationReport.validJson, validationReport.count);
+                return variance(validJson, column, filterCb);
+            
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
+            }
+        }
+    };
+
+    // Add variance to prototype for easy access
+    jsonData.prototype.variance = function(column, filterCb) {
+        return variance(this.json, column, filterCb);
+    };
+
+    /**
+     * Calculates the standard deviation of a data set (column)
+     * Data in column can be filtered with callback (filterCb)
+     * 
+     * @param (JSON array) json
+     * @param String column
+     * @param function filterCb
+     *     takes an object in the JSON array as an argument
+     *     should return true or false
+     *     used to filter values in column used for calculation based on values in the same column or other columns
+     *     e.g. function(data) {data.column == "value";}
+     */
+    var stdev = function(json, column, filterCb) {
+        // If JSON has already been validated, crunch numbers
+        if (json instanceof ValidJson) {
+            return Math.sqrt(variance(json, column, filterCb));
+        
+        // Data has not been validated
+        } else {
+
+            // Attempt to validate... everything!!!
+            try {
+                var validationReport = validateJson(json, column, filterCb);
+                var validJson = new ValidJson(validationReport.validJson, validationReport.count);
+                return stdev(validJson, column, filterCb);
+            
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
+            }
+        }
+    };
+
+    // Add stdev to prototype for easy access
+    jsonData.prototype.stdev = function(column, filterCb) {
+        return stdev(this.json, column, filterCb);
+    };
+
+    /**
+     * Calculates the standard error of the sample mean
+     * 
+     * @param (JSON array) json
+     * @param String column
+     * @param function filterCb
+     *     takes an object in the JSON array as an argument
+     *     should return true or false
+     *     used to filter values in column used for calculation based on values in the same column or other columns
+     *     e.g. function(data) {data.column == "value";}
+     */
+    var stderror = function(json, column, filterCb) {
+        // If JSON has already been validated, crunch numbers
+        if (json instanceof ValidJson) {
+            return stdev(json, column, filterCb)/Math.sqrt(json.count);
+        
+        // Data has not been validated
+        } else {
+
+            // Attempt to validate... everything!!!
+            try {
+                var validationReport = validateJson(json, column, filterCb);
+                var validJson = new ValidJson(validationReport.validJson, validationReport.count);
+                return stderror(validJson, column, filterCb);
+            
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
+            }
+        }
+    };
+
+    // Attach stderror function to the jsonData prototype for easy access
+    jsonData.prototype.stderror = function(column, filterCb) {
+        return stderror(this.json, column, filterCb);
     };
 
     /**
@@ -964,95 +1073,208 @@ var ss = (function(math, undefined) {
         return mode(this.json, column, filterCb);
     };
 
+    /*==========================================================*
+     * Probabilities, Distributions, and Population Estimations *
+     * -------------------------------------------------------- *
+     * Note: section depends heavily                            *
+     * on mathjs package                                        *
+     *==========================================================*/
+
     /**
-     * Calculates the variance of a data set (column)
-     * Data in column can be filtered with callback (filterCb)
+     * Calculates the natural log of the gamma function
+     * The log calculation is made to avoid arithmetic overflow
+     * The gamma function can easily be retrieved by Math.exp(lnGamma(z))
+     * Algorithm comes from http://www.rskey.org/CMS/index.php/the-library/11
+     * Form of the algorithm: Γ(z)=[(√(2π)/z)(p_0+∑ from(n=1..6) (p_n/(z+n))](z+5.5)^(z+0.5) * e^−(z+5.5)
      * 
-     * @param (JSON array) json
-     * @param String column
-     * @param function filterCb
-     *     takes an object in the JSON array as an argument
-     *     should return true or false
-     *     used to filter values in column used for calculation based on values in the same column or other columns
-     *     e.g. function(data) {data.column == "value";}
+     * @param Int z > 0
      */
-    var variance = function(json, column, filterCb) {
-        // If JSON has already been validated, crunch numbers
-        if (json instanceof ValidJson) {
-            
-            // Filter count if needed
-            return sumOfSquares(json, column, filterCb)/(json.count - 1);
-
-        // Data has not been validated
-        } else {
-
-
-            // Attempt to validate... everything!!!
-            try {
-                var validationReport = validateJson(json, column, filterCb);
-                var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                return mode(validJson, column, filterCb);
-            
-            // Validation failed, catch errors
-            } catch (err) {
-                
-                // Re-throw for catching later
-                throw err;
-            }
+    var lnGamma = function(z) {
+        if (isNaN(z)) {
+            throw new Error("lnGamma: the argument of this function must be a positive number");
         }
-    };
-
-    // Add variance to prototype for easy access
-    jsonData.prototype.variance = function(column, filterCb) {
-        return variance(this.json, column, filterCb);
-    };
-
-    /**
-     * Calculates the standard deviation of a data set (column)
-     * Data in column can be filtered with callback (filterCb)
-     * 
-     * @param (JSON array) json
-     * @param String column
-     * @param function filterCb
-     *     takes an object in the JSON array as an argument
-     *     should return true or false
-     *     used to filter values in column used for calculation based on values in the same column or other columns
-     *     e.g. function(data) {data.column == "value";}
-     */
-    var stdev = function(json, column, filterCb) {
-        // If JSON has already been validated, crunch numbers
-        if (json instanceof ValidJson) {
-            return Math.sqrt(variance(json, column, filterCb));
         
-        // Data has not been validated
-        } else {
-
-            // Attempt to validate... everything!!!
-            try {
-                var validationReport = validateJson(json, column, filterCb);
-                var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                return stdev(validJson, column, filterCb);
+        if (z < 0) {
+            throw new Error("lnGamma: the argument of this function must be positive");
+        }
+        
+        // Pre-derived parameters based on site providing algorithm
+        var params = [1.000000000190015, 76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 1.208650973866179e-3, -5.395239384953e-6],
+            sum = params[0],
+            answer;
             
-            // Validation failed, catch errors
-            } catch (err) {
-                
-                // Re-throw for catching later
-                throw err;
-            }
+        // Calculates the summation term of the algorithm
+        for (var i = 1; i < params.length; i++) {
+            sum += params[i]/(z + i);
+        }
+        
+        // Replace constants for faster calculation
+        // answer = (1/2) * Math.log(2 * Math.PI) - Math.log(z) + Math.log(sum) + (z + 0.5) * Math.log(z + 5.5) - (z + 5.5);
+        answer = 0.9189385332046727 - Math.log(z) + Math.log(sum) + (z + 0.5) * Math.log(z + 5.5) - (z + 5.5);
+        return answer;
+    };
+    
+    /**
+     * Calculates the lower incomplete gamma function
+     * Return the natural log to avoid arithmetic overflow in future calculations
+     * Lower Incomplete Gamma function can be achieved by Math.exp(lnGammaIncomplete)
+     * 
+     * @param Float a
+     * @param Float x
+     */
+    globalObject.lnGammaIncomplete = function(a, x) {
+        var errors = [];
+
+        // sanitize the data
+        if (isNaN(a)) {
+            errors.push("lnGammaIncomplete: the a parameter must be a number");
+        }
+
+        if (isNaN(x)) {
+            errors.push("lnGammaIncomplete: the x parameter must be a number");
+        }
+
+        var sum = 1/a,          // initialize sum and set to sum of first two terms of series
+            value = 1/a,        // stores the previous value
+            lastSum,            // store value of last sum for error estimation
+            error = 2.0e-10,    // tolerated error (same as gamma function)
+            n = 1,              // start loop at 1 as 0th term has already been calculated
+            maxIter = 1000;     // good enough (also avoiding arithmetic overflow in this case)
+
+        // Keep going until reach error threshhold or run out of iterations
+        do {
+            // Save last sum before calculation
+            lastSum = sum;
+            
+            // Multiply last value by change in term
+            value *= x/(a + n);
+
+            // Add value to continually growing sum
+            sum += value;
+
+            // increment count
+            n++;
+        } while (Math.abs((sum - lastSum)/sum) > error && n < maxIter);
+
+        // return [Math.exp(a * Math.log(x) - x + Math.log(sum)), n];    // for debugging
+        return a * Math.log(x) - x + Math.log(sum);
+    }
+
+    /**
+     * Calculates the natural log of the incomplete beta function
+     * The log is taken to avoid arithmetic overflow
+     * The incomplete beta function can easily be retrieved by Math.exp(lnBetaIncomplete(x, a, b))
+     * 
+     * Credit for the algorithm: http://dlmf.nist.gov/8.17#v
+     * Credit for continuous fraction implementation: https://en.wikipedia.org/wiki/Continued_fraction#Infinite_continued_fractions
+     *         and adussaq (https://github.com/adussaq)
+     * 
+     * @param Float x where 0 < x < 1
+     * @param Float a
+     * @param Float b
+     */
+    var lnBetaIncomplete = function(x, a, b) {
+        var errors = [];
+        
+        if (isNaN(x)) {
+            errors.push("lnBetaIncomplete: the parameter x: " + x + " must be a number");
+        }
+        
+        if (!isNaN(x) && (x > 1 || x < 0)) {
+            errors.push("lnBetaIncomplete: the parameter x: " + x + " must be between 0 and 1");
+        }
+        
+        if (isNaN(a)) {
+            errors.push("lnBetaIncomplete: the parameter a: " + a + " must be a number");
+        }
+        
+        if (isNaN(b)) {
+            errors.push("lnBetaIncomplete: the parameter b: " + b + " must be a number");
+        }
+        
+        if (errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+        
+        // A brief explanation of this function is in order:
+        // From the algorithm website, the formula is given as I_x (a,b) = x^a * (1−x)^b /a * (1/(1+d_1/(1+d_2/(1+d_3/(1+...
+        // For the continuous faction component (1/(1+d1/(1+d2/(1+d3/(1+... ) the following general solution can be shown
+        //     (a_0 + a_1/(1 + a_2/(1 + a_3/(1 + a_4...
+        //     the evaluation of the first n terms is given by h_n / k_n
+        //     where h_n = a_n * h_(n-2) + h_(n-1)
+        //     and k_n = a_n * k_(n-2) + k_(n-1)
+        //     NOTE: the current term and TWO previous terms must be remembered
+        
+        // For the incomplete beta function's partial fraction, the following 2 initial states exist
+        var h_0 = 0,            // no term in front added to the partial fraction
+            k_0 = 1,            // denominators are always 1 with a whole number (or 0) on top
+            h_1 = 1,            // the second numerator (a_0 + a_1) must be 1 given the partial fraction
+            k_1 = 1,            // denominators are always 1 with a whole number (or 0) on top
+            s_0 = h_0 / k_0,    // first proposed solution
+            s_1 = h_1 / k_1,    // second proposed solution
+            n = 1,              // this initiates d_1 NOT a_1
+            error = 2.0e-10,    // set error to same tolerance as gamma function
+            maxIter = 50,       // if answer is not found in 50 iterations, good enough
+            m,                  // n is a function of m in the incomplete beta function
+            d_n;                // used in the partial fraction of the incomplete beta function
+            
+        // Iterate until the difference between proposed solutions is within error tolerance
+        while (Math.abs((s_1 - s_0)/s_1) > error && n < maxIter) {
+            // Calculate m for odd n
+            m = (n - 1)/2;
+            
+            // Calculate odd d_n
+            d_n = -(a + m) * (a + b + m) * x / (a + 2*m) / (a + 2*m + 1);
+            
+            // Create new  initial numerator and denominator in set
+            // based on general partial fraction solution
+            h_0 = d_n * h_0 + h_1;
+            k_0 = d_n * k_0 + k_1;
+            
+            // Next term
+            n++;       // even n
+            m = n/2;   // Calculate m for even n
+            
+            // Calculate even d_n
+            d_n = m * (b - m) * x / (a + 2*m -1) / (a + 2*m);
+            
+            // Create new secondary numerator and denominator in set
+            // base on general partial fraction solution
+            h_1 = d_n * h_1 + h_0;
+            k_1 = d_n * k_1 + k_0;
+            
+            // Propose new solutions
+            s_0 = h_0 / k_0;
+            s_1 = h_1 / k_1;
+            
+            // Keep all numbers small (same as multiplying numerators and denominators by (1/k_1)/(1/k_1))
+            h_0 = h_0 / k_1;
+            k_0 = k_0 / k_1;
+            h_1 = s_1;  // s_1 = h_1/k_1
+            k_1 = 1;     // k_1/k_1
+            
+            // Increment for next loop
+            n++;
+        }
+        
+        // Log tranform everything to keep everything as small as possible for future calculations
+        return a * Math.log(x) + b * Math.log(1 - x) - Math.log(a) + Math.log(s_1);
+    };
+
+    /**
+     * Calculates the factorial of an integer >= 0
+     * 
+     * @param Int n
+     */
+    var factorial = function(n) {
+        if (n < 0 || !isInt(n)) {
+            return NaN;
+        } else if (n <= 1) {
+            return 1;
+        } else {
+            return n * factorial(n - 1);
         }
     };
-
-    // Add stdev to prototype for easy access
-    jsonData.prototype.stdev = function(column, filterCb) {
-        return stdev(this.json, column, filterCb);
-    };
-
-    /*=================================*
-     * Probabilities and Distributions *
-     * ------------------------------- *
-     * Note: section depends heavily   *
-     * on mathjs package               *
-     *=================================*/
 
     /**
      * Calculates the permutations of k objects chosen from n
@@ -1081,7 +1303,6 @@ var ss = (function(math, undefined) {
 
         if (errors.length > 0) {
             throw new Error(errors.join("; "));
-            return undefined;
         }
 
         var numerator = math.factorial(n);
@@ -1121,6 +1342,15 @@ var ss = (function(math, undefined) {
         return math.format(math.divide(numerator, denominator));
     };
 
+    /* --------------------- *
+     * Binomial distribution *
+     * --------------------- */
+
+    /**
+     * Object holding methods related to binomial distributions
+     */
+    globalObject.binom = {};
+
     /**
      * Calculates the probability of k number of successes in n number of trials based on a binomial distribution
      * 
@@ -1129,7 +1359,7 @@ var ss = (function(math, undefined) {
      * @param Float probability
      * @param Boolen cumulative
      */
-    globalObject.binomdist = function(successes, trials, probability, cumulative) {
+    globalObject.binom.dist = function(successes, trials, probability, cumulative) {
         cumulative = typeof cumulative === "undefined" ? false: cumulative;
         
         var errors = [],                 // error array for error reporting
@@ -1152,7 +1382,7 @@ var ss = (function(math, undefined) {
             errors.push("It is impossible to have more successes than trials, in both life and statistics...");
 
         if (typeof probability === "undefined")
-            error.push("A probability of success must be provided");
+            errors.push("A probability of success must be provided");
 
         if (probability > 1 || probability < 0)
             errors.push("The probability of a success must be between 0 and 1 (" + probability + ")");
@@ -1205,6 +1435,14 @@ var ss = (function(math, undefined) {
         }
     };
 
+    /* -------------------- *
+     * Poisson Distribution *
+     * -------------------- */
+
+    /**
+     * Object containing Poisson distribution methods
+     */
+     globalObject.poisson = {};
 
     /**
      * Calculates the probability of k number of successes in a given time frame t with an average number of 
@@ -1214,7 +1452,7 @@ var ss = (function(math, undefined) {
      * @param Float avgSuccesses
      * @param Boolean cumulative
      */
-    globalObject.poissondist = function(successes, avgSuccesses, cumulative) {
+    globalObject.poisson.dist = function(successes, avgSuccesses, cumulative) {
         cumulative = typeof cumulative === "undefined" ? false: cumulative;
         
         var errors = [],                 // error array for error reporting
@@ -1265,6 +1503,16 @@ var ss = (function(math, undefined) {
         }
     };
 
+    /* ------------------- *
+     * Normal Distribution *
+     * ------------------- */
+
+    /**
+     * Objects containing Normal distribution methods
+     */
+    globalObject.norm = {};
+    jsonData.prototype.norm = {};
+
     /**
      * Calculates the probability of getting the value x in an observation or the probability of x and anything less (cumulative)
      * Based on the formula (1/(sigma*sqrt(2*pi)))*e^((-1/(2*sigma^2))*(x-mu)^2)
@@ -1278,7 +1526,7 @@ var ss = (function(math, undefined) {
      * @param Float stdev
      * @param Boolean cumulative (optional)
      */
-    globalObject.normdist = function(x, mean, stdev, cumulative) {
+    globalObject.norm.dist = function(x, mean, stdev, cumulative) {
         cumulative = typeof cumulative === "undefined" ? true : cumulative;
         var errors = [];
 
@@ -1299,20 +1547,32 @@ var ss = (function(math, undefined) {
             throw new Error(errors.join("; "));
         }
 
+        // based on integration of normal distribution probability mass function
+        var errorFuncInput = ((x-mean)/stdev)/Math.sqrt(2),    // input t for error function
+            value = errorFuncInput,                            // storing original input for checking javascript rounding error
+            sum = errorFuncInput,                              // initializing sum as starting with the input of the error function
+            lastSum,                                           // remember the last sum for error tolerance
+            error = 2.0e-10,                                   // error threshhold set to be equal to gamma function
+            n = 1,                                             // start at n = 1 since the 0th term of the sum has laready been calculated
+            maxIter = 1000,                                    // good enough
+            prob;                                              // Proability, either cumulative or pdf
+
+
         // Integrate the pmf of the normal distribution
         if (cumulative === true) {
-            // based on integration of normal distribution probability mass function
-            var errorFuncInput = ((x-mean)/stdev)/Math.sqrt(2),
-                value = errorFuncInput,
-                sum = errorFuncInput,
-                prob;
 
-            // Summing first 1000 terms of error function Taylor series (sum from(n = 0) to(infinity) (((-1)^n)*z^(2n+1))/(n!(2n+1)))
-            for (var n = 1; n < 1001; n++) {
+            // Calculating sum to error threshhold or maxIter -- (sum from(n = 0) to(infinity) (((-1)^n)*z^(2n+1))/(n * (2n+1)))
+            do {
+                // save last sum before recalculating it for error analysis
+                lastSum = sum;
+
                 // Change the previous term in the sum to the current term by multiplying the previous value by the change
                 value *= (-1 * Math.pow(errorFuncInput, 2) * (2*n - 1))/(n * (2*n + 1));
                 sum += value;
-            }
+
+                // increment n
+                n++;
+            } while (Math.abs((sum - lastSum)/sum) > error && n < maxIter);
 
             // Error function value of cumulative probability distribution
             var errorFunction = 2 / Math.sqrt(Math.PI) * sum;
@@ -1320,6 +1580,8 @@ var ss = (function(math, undefined) {
             // handling javascript rounding problem
             if (errorFunction > 1) {
                 prob = 1;
+            } else if (errorFunction < -1) {
+                prob = 0;
             } else {
                 // cumulative probability
                 prob = 1 / 2 * (1 + errorFunction);
@@ -1330,6 +1592,7 @@ var ss = (function(math, undefined) {
             prob = (1 / (stdev * Math.sqrt(2 * Math.PI))) * Math.pow(Math.E, (-1 / (2 * Math.pow(stdev, 2)) * Math.pow((x - mean), 2)));
         }
 
+        // return [prob, n];    // for debugging
         return prob;
     };
 
@@ -1341,24 +1604,28 @@ var ss = (function(math, undefined) {
      * @param Float mean
      * @param Float stdev
      */
-    globalObject.norminv = function(prob, mean, stdev) {
+    globalObject.norm.inv = function(prob, mean, stdev) {
         var errors = [];
 
         // Sanitize the data
         if (isNaN(prob)) {
-            errors.push("normdist: the x value " + x + " is not a number");
+            errors.push("norm.inv: the probability " + prob + " is not a number");
         }
 
         if (prob > 1 || prob < 0) {
-            errors.push("normdist: the probability " + prob + " should be between 0 and 1 including the bounds");
+            errors.push("norm.inv: the probability " + prob + " should be between 0 and 1 including the bounds");
         }
 
         if (isNaN(mean)) {
-            errors.push("normdist: the mean " + mean + " is not a number");
+            errors.push("norm.inv: the mean " + mean + " is not a number");
         }
 
         if (isNaN(stdev)) {
-            errors.push("normdist: the standard deviation " + stdev + " is not a number");
+            errors.push("norm.inv: the standard deviation " + stdev + " is not a number");
+        }
+
+        if (!isNaN(stdev) && stdev < 0) {
+            errors.push("norm.inv: the standard deviation " + stdev + " should be positive");
         }
 
         if(errors.length > 0) {
@@ -1389,7 +1656,7 @@ var ss = (function(math, undefined) {
         // Guess until gone for too many iterations or arrived within error
         do {
             // Check the guess
-            diff = prob - globalObject.normdist(z, 0, 1, true);
+            diff = prob - globalObject.norm.dist(z, 0, 1, true);
 
             // Change direction on number line based on whether still above or below actual value
             if (diff > 0) {
@@ -1420,36 +1687,48 @@ var ss = (function(math, undefined) {
         } while (Math.abs(diff) > error && iter < maxIter);
 
         // return value back based on user-select normal distribution
-        //return [z * stdev + mean, globalObject.normdist(z, 0, 1, true), iter]; (for debugging)
+        //return [z * stdev + mean, globalObject.norm.dist(z, 0, 1, true), iter]; // (for debugging)
         return z * stdev + mean;
-    }
+    };
 
     /**
-     * Calculates the x value such that P(-x < X < x) is equal to the provided user probability
-     * assuming a normal distribution
+     * Calculates the value z * stderror such that P(-z < Z < z) is equal to the provided user alpha (1 - prob)
+     * where Z is normally distributed with mu = 0 and sigma = 1 (a standard normal distribution)
+     * and z = (x - mean)/sigma
      * 
-     * @param Float probability
-     * @param Float mean
-     * @param Float stdev
+     * In other words, calculates the confidence interval for a sample mean if the population 
+     * standard deviation is known
+     * 
+     * @param Float alpha
+     * @param Float popStdev
+     * @param Int sampleSize
      */
-    globalObject.normbetween = function(prob, mean, stdev) {
+    globalObject.norm.conf = function(alpha, popStdev, sampleSize) {
         var errors = [];
 
         // Sanitize the data
-        if (isNaN(prob)) {
-            errors.push("normdist: the x value " + x + " is not a number");
+        if (isNaN(alpha)) {
+            errors.push("norm.conf: the alpha value " + alpha + " is not a number");
         }
 
-        if (prob > 1 || prob < 0) {
-            errors.push("normdist: the probability " + prob + " should be between 0 and 1 including the bounds");
+        if (alpha > 1 || alpha < 0) {
+            errors.push("norm.conf: the alpha " + alpha + " should be between 0 and 1 including the bounds");
         }
 
-        if (isNaN(mean)) {
-            errors.push("normdist: the mean " + mean + " is not a number");
+        if (isNaN(popStdev)) {
+            errors.push("norm.conf: the population standard " + popStdev + " is not a number");
         }
 
-        if (isNaN(stdev)) {
-            errors.push("normdist: the standard deviation " + stdev + " is not a number");
+        if (!isNaN(popStdev) && popStdev < 0) {
+            errors.push("norm.conf: the population standard deviation " + popStdev + " should be positive");
+        }
+
+        if (isNaN(sampleSize)) {
+            errors.push("norm.conf: the sample size " + sampleSize + " is not a number");
+        }
+
+        if (!isNaN(sampleSize) && sampleSize < 0) {
+            errors.push("norm.conf: the sample size " + sampleSize + " should be positive");
         }
 
         if(errors.length > 0) {
@@ -1457,10 +1736,282 @@ var ss = (function(math, undefined) {
         }
 
         // Based on the fact that the normal distribution is symmetric and P(X < mu) = 0.5
-        var cumulativeProb = 0.5 + prob / 2;
+        var cumulativeProb = 1 - alpha / 2;
 
-        return globalObject.norminv(cumulativeProb, mean, stdev);
-    }
+        var z = globalObject.norm.inv(cumulativeProb, 0, 1);
+        return z * popStdev / Math.sqrt(sampleSize);
+    };
 
+    /* -------------- *
+     * T Distribution *
+     * -------------- */
+
+    /**
+     * Objects containing T distribution methods
+     */
+    globalObject.t = {};          // t distribution functions for any data
+    var t = {};                   // t distribution function for file data
+    jsonData.prototype.t = {};    // t object to receive file distribution methods (line above)
+
+    /**
+     * Calculates the cumulative t distribution
+     * Algorithm from (https://en.wikipedia.org/wiki/Student%27s_t-distribution#Cumulative_distribution_function)
+     * 
+     * @param Float t
+     * @param Int df
+     */
+    globalObject.t.dist = function(tValue, df, cumulative) {
+        cumulative = typeof cumulative === "undefined" ? true : cumulative;
+        var errors = [];
+        
+        // Error checking
+        if (isNaN(tValue)) {
+            errors.push("t.dist: The t value: " + tValue + " must be a number");
+        }
+        
+        if (isNaN(df)) {
+            errors.push("t.dist: The degrees of freedom: " + df + " must be a number");
+        }
+        
+        if (df < 0) {
+            errors.push("t.dist: The degrees of freedom: " + df + " must be positive");
+        }
+        
+        if (errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        // parameters for beta functions
+        var x = df / (Math.pow(tValue, 2) + df),    // x parameter of beta function
+            a = df / 2,                             // a parameter of beta function
+            b = 1 / 2,                              // b parameter of beta function
+            lnRegBetaInc,                           // natural log of regularized incomplete beta function (B(x; a, b)/B(a, b))
+            regBetaInc,                             // regularized incomplete beta function
+            prob;                                   // probability of given tValue
+
+        if (cumulative === true) {
+
+            // Calculate lnBeta function using gamma function
+            // Beta(a, b) = Gamma(a) * Gamma(b) / Gamma(a + b)
+            // var lnBeta = lnGamma(df/2) + lnGamma(1/2) - lnGamma((df+1)/2);
+            var lnBeta = lnGamma(df/2) + 0.572364942924743 - lnGamma((df+1)/2);
+
+            // Optimized convergence based on (http://dlmf.nist.gov/8.17#v)
+            if (x < (a + 1) / (a + b + 2)) {
+                lnRegBetaInc = lnBetaIncomplete(x, a, b) - lnBeta;
+                regBetaInc = Math.exp(lnRegBetaInc);
+            } else {
+
+                // Note that Beta(a, b) = Beta(b, a), allowing same value for lnBeta to be used as above
+                lnRegBetaInc = lnBetaIncomplete(1 - x, b, a) - lnBeta;
+                regBetaInc = 1 - Math.exp(lnRegBetaInc);
+            }
+
+            // Final step based on whether tValue > 0
+            if (tValue < 0) {
+                prob = regBetaInc / 2;
+            } else {
+                prob = 1 - regBetaInc / 2;
+            }
+        } else {
+
+            // Equation from (wiki article)
+            prob = Math.exp(lnGamma((df + 1) / 2) - (1/2) * Math.log(df * Math.PI) - lnGamma(df / 2) - ((df + 1) / 2) * Math.log(1 + (Math.pow(prob, 2)/df)));
+        }
+
+        return prob;
+    };
+
+
+    /**
+     * Calculates the smallest t value that will give a cumulative probability equal to user input
+     * Function provided by adussaq (https://github.com/adussaq)
+     * 
+     * @param Float prob
+     * @param Int df
+     */
+    globalObject.t.inv = function(prob, df) {
+        var errors = [];
+
+        // Sanitize the data
+        if (isNaN(prob)) {
+            errors.push("t.inv: the probability " + prob + " is not a number");
+        }
+
+        if (prob > 1 || prob < 0) {
+            errors.push("t.inv: the probability " + prob + " should be between 0 and 1 including the bounds");
+        }
+
+        if (isNaN(df)) {
+            errors.push("t.inv: the degrees of freedom " + df + " is not a number");
+        }
+
+        if (!isNaN(stdev) && stdev < 0) {
+            errors.push("t.inv: the degrees of freedom " + df + " should be positive");
+        }
+
+        if(errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        var t,                  // t value that will be associated with user-submitted probability
+            diff,               // difference between guessed probability and user submitted probability
+            error = 1e-10,      // allowed error between guessed probability and user submitted probability
+            maxIter = 1000,     // after 1000 iterations, it's close enough
+            step = 0.25,        // gives faster convergence on diff
+            stepInc = 1.2,      // increase step to converge faster
+            stepDec = 0.5,      // decreases step for after overshoot
+            iter = 0,           // counts number of iterations
+            direction = 1,      // determines direction of alternation
+            lastDiff = 1;       // used to calculate overshooting
+
+        // Make some intelligent guesses based on knowing that, for a standard normal distribution,
+        // a probability < 0.5 must be from a negative z and a probability > 0.5 must be from a positive z
+        if (prob < 0.5) {
+            t = -0.5;
+        } else if (prob > 0.5) {
+            t = 0.5;
+        } else {
+            t = 0;
+        }
+
+        // Guess until gone for too many iterations or arrived within error
+        do {
+            // Check the guess
+            diff = prob - globalObject.t.dist(t, df, true);
+
+            // Change direction on number line based on whether still above or below actual value
+            if (diff > 0) {
+                direction = 1;
+            } else if (diff < 0) {
+                direction = -1;
+            } else {
+                direction = 0;
+            }
+
+            // Increase step rate until overshoot
+            if (lastDiff * diff > 0) {
+                step *= stepInc;
+
+            // Decrease step rate immediately after overshooting to narrow in
+            } else {
+                step *= stepDec;
+            }
+
+            // create another guess
+            t += direction * step;
+
+            // save last diff to check for overshooting
+            lastDiff = diff;
+
+            // Maintain count of iterations thus far
+            iter++;
+        } while (Math.abs(diff) > error && iter < maxIter);
+
+        // return value back based on user-select normal distribution
+        //return [t, globalObject.t.dist(t, df, true), iter]; // (for debugging)
+        return t;
+    };
+
+    /**
+     * Calculates the confidence interval of a sample mean assuming the population variance is unknown
+     * Returns the +/- value that is to be added added/subtracted to/from the sample mean
+     * 
+     * @param Float alpha
+     * @param Float stdev
+     * @param Int 
+     */
+    globalObject.t.conf = function(alpha, stdev, sampleSize) {
+        var errors = [];
+
+        if (isNaN(alpha)) {
+            errors.push("t.conf: The alpha value must be a number");
+        }
+
+        if (!isNaN(alpha) && (alpha > 1 || alpha < 0)) {
+            errors.push("t.conf: The alpha value must be between 0 and 1");
+        }
+
+        if (isNaN(stdev)) {
+            errors.push("t.conf: The standard deviation must be a number");
+        }
+
+        if (isNaN(sampleSize)) {
+            errors.push("t.conf: The sample size must be a number");
+        }
+
+        if (!isNaN(sampleSize) && sampleSize < 0) {
+            errors.push("t.conf: The sample size must be a positive number");
+        }
+
+        if (!isNaN(sampleSize) && !isInt(sampleSize)) {
+            errors.push("t.conf: The sample size must be an integer as only serial killers deal in fractions of people and we are assuming users don't fall into that category");
+        }
+
+        if (errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        var prob = 1 - alpha / 2,
+            df = sampleSize - 1;
+
+        var t = globalObject.t.inv(prob, df, true);
+        return t * stdev / Math.sqrt(sampleSize);
+    };
+
+    /**
+     * Calculates the kth percentile (exclusive) of a data set (column)
+     * Data in column can be filtered with callback (filterCb)
+     * 
+     * @param Number k
+     * @param (JSON array) json
+     * @param String column
+     * @param function filterCb
+     *     takes an object in the JSON array as an argument
+     *     should return true or false
+     *     used to filter values in column used for calculation based on values in the same column or other columns
+     *     e.g. function(data) {data.column == "value";}
+     */
+    t.conf = function(alpha, json, column, filterCb) {
+        // If JSON has already been validated, crunch numbers
+        if (json instanceof ValidJson) {
+            var std = stdev(json.validJson, column, filterCb);
+            return globalObject.t.conf(alpha, std, json.count);
+
+        // Data has not been validated
+        } else {
+
+            // Attempt to validate... everything!!!
+            try {
+                var validationReport = validateJson(json, column, filterCb);
+                var validJson = new ValidJson(validationReport.validJson, validationReport.count);
+                return t.conf(alpha, validJson, column, filterCb);
+            
+            // Validation failed, catch errors
+            } catch (err) {
+                
+                // Re-throw for catching later
+                throw err;
+            }
+        }
+    };
+    
+    // Allowing jsonData to have access to t.conf for easy calculation on any column
+    jsonData.prototype.t.conf = function(alpha, column, filterCb) {
+        return t.conf(alpha, jsonData.prototype.json, column, filterCb);
+    };
+
+    /* ----------------------- *
+     * Chi Square Distribution *
+     * ----------------------- */
+
+    /**
+     * Objects containing Chi Square distribution methods
+     */
+    globalObject.chis = {};          // chi square distribution functions for any data
+    var chis = {};                   // chi square distribution function for file data
+    jsonData.prototype.chis = {};    // chi square object to receive file distribution methods (line above)
+
+    
     return globalObject;
 })(math);
