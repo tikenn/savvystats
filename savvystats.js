@@ -2230,7 +2230,8 @@ var ss = (function(undefined) {
         };
 
         /**
-         * Calculates the kth percentile (exclusive) of a data set (column)
+         * Calculates the kth percentile (weighted, exclusive) of a data set (column)
+         * Function comes from (https://en.wikipedia.org/wiki/Percentile#NIST_method)
          * Data in column can be filtered with callback (filterCb)
          * 
          * @param Number k
@@ -2254,7 +2255,9 @@ var ss = (function(undefined) {
 
                     // Position used to determine percentile ((k/100) * (n + 1))
                     // Because arrays are 0-based, subtract 1 to correct locator position
-                    var locatorPos = (k/100) * (json.count + 1);
+                    var locatorPos = (k/100) * (json.count + 1),
+                        locatorPosInt = Math.floor(locatorPos),
+                        locatorPosDec = locatorPos - locatorPosInt;
 
                     // The 0th percentile doesn't technically exist, but can be considered to be the min value
                     if (k === 0) {
@@ -2264,16 +2267,9 @@ var ss = (function(undefined) {
                     } else if (k === 100) {
                         return parseFloat(sortedJson[json.count - 1][column]);
 
-                    // If locatorPos is int, the value at that position is the percentile (locatorPos - 1 because arrays are zero-based)
-                    } else if (isInt(locatorPos)) {
-                        return parseFloat(sortedJson[locatorPos - 1][column]);
-                    
-                    // If the locatorPos is not an int, the take the floor of locatorPos 
-                    // and then average the value at that position and the value one position above
-                    // Again, the special trick below are because arrays are zero-based
+                    // formula based on NIST suggestion, this is a weighted non-exclusive percentile
                     } else {
-                        locatorPos = Math.floor(locatorPos);
-                        return (parseFloat(sortedJson[locatorPos - 1][column]) + parseFloat(sortedJson[locatorPos][column]))/2;
+                        return parseFloat(sortedJson[locatorPosInt - 1][column]) + parseFloat(locatorPosDec) * (parseFloat(sortedJson[locatorPosInt][column]) - parseFloat(sortedJson[locatorPosInt - 1][column]));
                     }
 
                 // k was not a number or it was not in the range
