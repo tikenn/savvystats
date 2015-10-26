@@ -2662,7 +2662,6 @@ var ss = (function(undefined) {
             if (json instanceof ValidJson) {
                 var sampleStdev = stdev(json.validJson, column, filterCb),
                     sampleVariance = variance(json.validJson, column, filterCb);
-                    alert(sampleVariance);
 
                 return [sampleVariance - globalObject.chisq.conf(alpha, sampleStdev, json.count)[0], sampleVariance + globalObject.chisq.conf(alpha, sampleStdev, json.count)[1]];
 
@@ -2708,7 +2707,6 @@ var ss = (function(undefined) {
             if (json instanceof ValidJson) {
                 var sampleStdev = stdev(json.validJson, column, filterCb),
                     sampleVariance = variance(json.validJson, column, filterCb);
-                    alert(sampleVariance);
 
                 return sampleVariance + globalObject.chisq.conf.lower(alpha, sampleStdev, json.count);
 
@@ -2755,7 +2753,6 @@ var ss = (function(undefined) {
             if (json instanceof ValidJson) {
                 var sampleStdev = stdev(json.validJson, column, filterCb),
                     sampleVariance = variance(json.validJson, column, filterCb);
-                    alert(sampleVariance);
 
                 return sampleVariance + globalObject.chisq.conf.upper(alpha, sampleStdev, json.count);
 
