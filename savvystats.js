@@ -370,7 +370,6 @@ var ss = (function(undefined) {
         cumulative = typeof cumulative === "undefined" ? false: cumulative;
         
         var errors = [];                 // error array for error reporting
-<<<<<<< HEAD
 
         // Sanitizing input
         if (!isInt(successes))
@@ -391,28 +390,6 @@ var ss = (function(undefined) {
         if (typeof probability === "undefined")
             errors.push("A probability of success must be provided");
 
-=======
-
-        // Sanitizing input
-        if (!isInt(successes))
-            errors.push("The number of successes must be an integer (" + successes + ")");
-
-        if (successes < 0)
-            errors.push("The number of successes must be a positive integer (" + successes + ")");
-
-        if (!isInt(trials))
-            errors.push("The number of trials must be an integer (" + trials + ")");
-
-        if (trials < 0)
-            errors.push("The number of trials must be a positive integer (" + trials + ")");
-
-        if (successes > trials)
-            errors.push("It is impossible to have more successes than trials, in both life and statistics...");
-
-        if (typeof probability === "undefined")
-            errors.push("A probability of success must be provided");
-
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
         if (probability > 1 || probability < 0)
             errors.push("The probability of a success must be between 0 and 1 (" + probability + ")");
 
@@ -441,66 +418,6 @@ var ss = (function(undefined) {
             // return 0 as the answer
             if (successProbabiltyTerm === 0 || mutExclProbabilityTerm === 0) {
                 return 0;
-<<<<<<< HEAD
-            }
-
-            // start the probability term out with the smallest term of p^k or q^(n-k)
-            // I'm assuming that the term chosen above multiplied by the combinations can 
-            //     never overflow...
-            if (successProbabiltyTerm > mutExclProbabilityTerm) {
-                prob = mutExclProbabilityTerm;
-                lastValue = successProbabiltyTerm;
-            } else {
-                prob = successProbabiltyTerm;
-                lastValue = mutExclProbabilityTerm;
-            }
-
-            // -----------------------------------------------
-            // Basically the same as the combinations function
-            // Reused to allow larger calculations
-            // -----------------------------------------------
-
-            // set numerator and denominator based on whether successes or trials-successes is bigger
-            if (successes > trials - successes) {
-                numeratorProductEnd = successes;
-                denominator = trials - successes;
-            } else {
-                numeratorProductEnd = trials - successes;
-                denominator = successes;
-            }
-
-            // Go through each term
-            for (numerator = trials; numerator > numeratorProductEnd; numerator--) {
-                value = numerator / denominator;
-                prob *= value;
-
-                // There will always be equal number of terms in the numerator and denominator
-                denominator--;
-            }
-
-            // Multiply the last value (either a probability or 1)
-            prob *= lastValue;
-
-            return prob;
-
-        };
-
-        var total = 0;
-
-        // No cumulative distribution
-        if (cumulative === false) {
-            return binomDistCalc(successes, trials, probability);
-        
-        // User asked for cumulative distribution
-        } else {
-
-            // Loop through current number of successes and all smaller number of successes and add probabilities together
-            // for cumulative probability
-            for (successes; successes >= 0; successes--) {
-                total += binomDistCalc(successes, trials, probability);
-            }
-            return total;
-=======
             }
 
             // start the probability term out with the smallest term of p^k or q^(n-k)
@@ -562,43 +479,6 @@ var ss = (function(undefined) {
         }
     };
 
-    /* -------------------- *
-     * Poisson Distribution *
-     * -------------------- */
-
-    // Object containing Poisson distribution methods
-     globalObject.poisson = {};
-
-    /**
-     * Calculates the probability of k number of successes in a given time frame t with an average number of 
-     * successes mu in time frame t
-     * Idea for use of natural log comes from (https://en.wikipedia.org/wiki/Poisson_distribution#Definition)
-     * 
-     * @param Int successes
-     * @param Float avgSuccesses
-     * @param Boolean cumulative
-     */
-    globalObject.poisson.dist = function(successes, avgSuccesses, cumulative) {
-        cumulative = typeof cumulative === "undefined" ? false: cumulative;
-        
-        var errors = [];                 // error array for error reporting
-
-        // Sanitizing input
-        if (successes % 1 > 0)
-            errors.push("The number of successes must be an integer (" + successes + ")");
-
-        if (successes < 0)
-            errors.push("The number of successes must be a positive integer (" + successes + ")");
-
-        if (avgSuccesses < 0)
-            errors.push("The average number of successes must be a positive number (" + avgSuccesses + ")");
-
-        if (errors.length > 0) {
-            throw new Error(errors.join("; "));
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
-        }
-
-<<<<<<< HEAD
     /* -------------------- *
      * Poisson Distribution *
      * -------------------- */
@@ -714,89 +594,6 @@ var ss = (function(undefined) {
             maxIter = 1000,                                    // good enough
             prob;                                              // Proability, either cumulative or pdf
 
-=======
-        // Performs actual calculation
-        // Based on the formula ((e^-mu)*(mu^k))/k!
-        var poissonDistCalc = function(successes, avgSuccesses) {
-            var prob;    // The probability from the poisson distribution
-
-            prob = Math.exp(successes * Math.log(avgSuccesses) - avgSuccesses - lnGamma(successes + 1));
-            return prob;
-        };
-
-        var total = 0;    // total for the cumulative distribution
-
-        // No cumulative distribution
-        if (cumulative === false) {
-            return poissonDistCalc(successes, avgSuccesses);
-        
-        // User asked for cumulative distribution
-        } else {
-
-            // Loop through current number of successes and all smaller number of successes and add probabilities together
-            // for cumulative probability
-            for (successes; successes >= 0; successes--) {
-                total += poissonDistCalc(successes, avgSuccesses);
-            }
-            return total;
-        }
-    };
-
-    /* ------------------- *
-     * Normal Distribution *
-     * ------------------- */
-
-    // Objects containing Normal distribution methods
-    globalObject.norm = {};
-
-    /**
-     * Calculates the probability of getting the value x in an observation or the probability of x and anything less (cumulative)
-     * Based on the formula (1/(sigma*sqrt(2*pi)))*e^((-1/(2*sigma^2))*(x-mu)^2)
-     * Integration of the above function results in the cumulative distribution function
-     *
-     * See https://en.wikipedia.org/wiki/Normal_distribution#Cumulative_distribution_function and 
-     *      https://en.wikipedia.org/wiki/Error_function for how this works
-     * 
-     * @param Float x
-     * @param Float mean
-     * @param Float stdev
-     * @param Boolean cumulative (optional)
-     */
-    globalObject.norm.dist = function(x, mean, stdev, cumulative) {
-        // Set default cumulative to true as this is the expected behavior for this function
-        cumulative = typeof cumulative === "undefined" ? true : cumulative;
-
-        var errors = [];
-
-        // Sanitize the data
-        if (isNaN(x)) {
-            errors.push("normdist: the x value " + x + " is not a number");
-        }
-
-        if (isNaN(mean)) {
-            errors.push("normdist: the mean " + mean + " is not a number");
-        }
-
-        if (isNaN(stdev)) {
-            errors.push("normdist: the standard deviation " + stdev + " is not a number");
-        }
-
-        if(errors.length > 0) {
-            throw new Error(errors.join("; "));
-        }
-
-        // based on integration of normal distribution probability mass function
-        var errorFuncInput = ((x-mean)/stdev)/Math.sqrt(2),    // input t for error function
-            value = errorFuncInput,                            // storing original input for checking javascript rounding error
-            sum = errorFuncInput,                              // initializing sum as starting with the input of the error function
-            lastSum,                                           // remember the last sum for error tolerance
-            error = 2.0e-10,                                   // error threshhold set to be equal to gamma function
-            n = 1,                                             // start at n = 1 since the 0th term of the sum has laready been calculated
-            maxIter = 1000,                                    // good enough
-            prob;                                              // Proability, either cumulative or pdf
-
-
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
         // Integrate the pmf of the normal distribution
         if (cumulative === true) {
 
@@ -816,13 +613,8 @@ var ss = (function(undefined) {
             // Error function value of cumulative probability distribution
             var errorFunction = 2 / Math.sqrt(Math.PI) * sum;
 
-<<<<<<< HEAD
             // handling javascript rounding problem and large number problem
             if (errorFunction > 1 || Math.abs(errorFunction) === Infinity) {
-=======
-            // handling javascript rounding problem
-            if (errorFunction > 1) {
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
                 prob = 1;
             } else if (errorFunction < -1) {
                 prob = 0;
@@ -999,7 +791,6 @@ var ss = (function(undefined) {
      * @param Int sampleSize
      */
     globalObject.norm.conf.lower = function(alpha, popStdev, sampleSize) {
-<<<<<<< HEAD
         var errors = [];
 
         // Sanitize the data
@@ -1074,38 +865,10 @@ var ss = (function(undefined) {
             errors.push("norm.conf: the sample size " + sampleSize + " should be positive");
         }
 
-=======
-        // Sanitize the data
-        if (isNaN(alpha)) {
-            errors.push("norm.conf: the alpha value " + alpha + " is not a number");
-        }
-
-        if (alpha > 1 || alpha < 0) {
-            errors.push("norm.conf: the alpha " + alpha + " should be between 0 and 1 including the bounds");
-        }
-
-        if (isNaN(popStdev)) {
-            errors.push("norm.conf: the population standard " + popStdev + " is not a number");
-        }
-
-        if (!isNaN(popStdev) && popStdev < 0) {
-            errors.push("norm.conf: the population standard deviation " + popStdev + " should be positive");
-        }
-
-        if (isNaN(sampleSize)) {
-            errors.push("norm.conf: the sample size " + sampleSize + " is not a number");
-        }
-
-        if (!isNaN(sampleSize) && sampleSize < 0) {
-            errors.push("norm.conf: the sample size " + sampleSize + " should be positive");
-        }
-
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
         // Based on the fact that the normal distribution is symmetric and P(X < mu) = 0.5
         var cumulativeProb = 1 - alpha;
 
         var z = globalObject.norm.inv(cumulativeProb, 0, 1);
-<<<<<<< HEAD
         return -z * popStdev / Math.sqrt(sampleSize);
     };
 
@@ -1173,57 +936,6 @@ var ss = (function(undefined) {
         }
     };
 
-=======
-        return z * popStdev / Math.sqrt(sampleSize);
-    };
-
-    /**
-     * Calculates the value z * stderror such that P(Z > -z) is equal to the provided user alpha (1 - prob)
-     * where Z is normally distributed with mu = 0 and sigma = 1 (a standard normal distribution)
-     * and z = (x - mean)/sigma
-     * 
-     * In other words, calculates the upper confidence interval for a sample mean if the population 
-     * standard deviation is known
-     * 
-     * @param Float alpha
-     * @param Float popStdev
-     * @param Int sampleSize
-     */
-    globalObject.norm.conf.upper = function(alpha, popStdev, sampleSize) {
-        // Sanitize the data
-        if (isNaN(alpha)) {
-            errors.push("norm.conf: the alpha value " + alpha + " is not a number");
-        }
-
-        if (alpha > 1 || alpha < 0) {
-            errors.push("norm.conf: the alpha " + alpha + " should be between 0 and 1 including the bounds");
-        }
-
-        if (isNaN(popStdev)) {
-            errors.push("norm.conf: the population standard " + popStdev + " is not a number");
-        }
-
-        if (!isNaN(popStdev) && popStdev < 0) {
-            errors.push("norm.conf: the population standard deviation " + popStdev + " should be positive");
-        }
-
-        if (isNaN(sampleSize)) {
-            errors.push("norm.conf: the sample size " + sampleSize + " is not a number");
-        }
-
-        if (!isNaN(sampleSize) && sampleSize < 0) {
-            errors.push("norm.conf: the sample size " + sampleSize + " should be positive");
-        }
-
-        // Based on the fact that the normal distribution is symmetric and P(X < mu) = 0.5
-        var cumulativeProb = 1 - alpha;
-
-        var z = globalObject.norm.inv(cumulativeProb, 0, 1);
-        return -z * popStdev / Math.sqrt(sampleSize);
-    };
-
-
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
     /* -------------- *
      * T Distribution *
      * -------------- */
@@ -1484,7 +1196,6 @@ var ss = (function(undefined) {
      */
     globalObject.t.conf.upper = function(alpha, stdev, sampleSize) {
         var errors = [];
-<<<<<<< HEAD
 
         // Sanitize the data
         if (isNaN(alpha)) {
@@ -1495,18 +1206,6 @@ var ss = (function(undefined) {
             errors.push("t.conf: The alpha value must be between 0 and 1");
         }
 
-=======
-
-        // Sanitize the data
-        if (isNaN(alpha)) {
-            errors.push("t.conf: The alpha value must be a number");
-        }
-
-        if (!isNaN(alpha) && (alpha > 1 || alpha < 0)) {
-            errors.push("t.conf: The alpha value must be between 0 and 1");
-        }
-
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
         if (isNaN(stdev)) {
             errors.push("t.conf: The standard deviation must be a number");
         }
@@ -1527,7 +1226,6 @@ var ss = (function(undefined) {
         return -t * stdev / Math.sqrt(sampleSize);
     };
 
-<<<<<<< HEAD
     /**
      * Performs a 1 sample t test and returns the probability the sample mean based on the expected mean 
      * given the directionality of the alternative
@@ -1594,8 +1292,6 @@ var ss = (function(undefined) {
         }
     };
 
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
 
     /* ----------------------- *
      * Chi Square Distribution *
@@ -1748,10 +1444,7 @@ var ss = (function(undefined) {
 
     /**
      * Calculates the right-sided confidence interval for variance using the chisq distribution
-<<<<<<< HEAD
      * Returns the numbers to be added to the variance to form the bounds (array is returned )
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
      * Solution comes from FUNDAMENTALS OF BIOSTATISTSICS SEVENTH EDITION Bernard Rosner p. 180
      * 
      * @param Float alpha
@@ -1835,12 +1528,8 @@ var ss = (function(undefined) {
             errors.push("chisq.conf: The sample size must be a positive number");
         }
 
-<<<<<<< HEAD
         if (!isNaN(sampleSize) && !isInt(sampleSize)) {
             errors.push("chisq.conf: The sample size must be an integer as only serial killers deal in fractions of people and we are assuming users don't fall into that category");
-=======
-        if (!isNaN(sampleSize) && !isInt(sampleSize)) {            errors.push("chisq.conf: The sample size must be an integer as only serial killers deal in fractions of people and we are assuming users don't fall into that category");
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
         }
 
         if (errors.length > 0) {
@@ -1859,10 +1548,7 @@ var ss = (function(undefined) {
 
     /**
      * Calculates the right-sided confidence interval for variance using the chisq distribution
-<<<<<<< HEAD
      * Returns the value to be added to variance to create the lower bound
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
      * Solution comes from FUNDAMENTALS OF BIOSTATISTSICS SEVENTH EDITION Bernard Rosner p. 180
      * 
      * @param Float alpha
@@ -1902,11 +1588,7 @@ var ss = (function(undefined) {
         }
 
         var lowerBoundProb = 1 - alpha,    // while counterintuitive as the lower bound, this is based on the derived solution
-<<<<<<< HEAD
             lowerIntervalBound;              // lower bound of confidence interval (chi-square distribution is not symmetric)
-=======
-            lowerIntervalBound,              // lower bound of confidence interval (chi-square distribution is not symmetric)
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
 
         // Calculate the bounds of the interval
         lowerIntervalBound = (sampleSize - 1) * Math.pow(stdev, 2) / globalObject.chisq.inv(lowerBoundProb, sampleSize - 1);
@@ -1915,7 +1597,6 @@ var ss = (function(undefined) {
         return -lowerIntervalBound;
     };
 
-<<<<<<< HEAD
     /**
      * Performs a 1 sample chi square test and returns the probability the sample stdev based on the expected stdev 
      * given the directionality of the alternative
@@ -1978,8 +1659,6 @@ var ss = (function(undefined) {
         }
     };
 
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
     /*=========================*
      * File Statistics Section *
      *=========================*/
@@ -2360,11 +2039,7 @@ var ss = (function(undefined) {
 
         self.count = function(column, filterCb) {
             return count(self.json, column, filterCb);
-<<<<<<< HEAD
         };
-=======
-        }
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
 
         /**
          * Log transforms a column in the data set and returns the new data set
@@ -3036,14 +2711,11 @@ var ss = (function(undefined) {
          *     e.g. function(data) {data.column == "value";}
          */
         t.conf = function(alpha, json, column, filterCb) {
-<<<<<<< HEAD
             // sanitize the data
             if (!isNaN(alpha) || alpha > 1 || alpha < 0){
                 throw new Error("t.conf: alpha must be a number between 0 and 1");
             }
 
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
             // If JSON has already been validated, crunch numbers
             if (json instanceof ValidJson) {
                 var sampleStdev = stdev(json.validJson, column, filterCb),
@@ -3090,14 +2762,11 @@ var ss = (function(undefined) {
          *     e.g. function(data) {data.column == "value";}
          */
         t.conf.lower = function(alpha, json, column, filterCb) {
-<<<<<<< HEAD
             // sanitize the data
             if (!isNaN(alpha) || alpha > 1 || alpha < 0){
                 throw new Error("t.conf: alpha must be a number between 0 and 1");
             }
 
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
             // If JSON has already been validated, crunch numbers
             if (json instanceof ValidJson) {
                 var sampleStdev = stdev(json.validJson, column, filterCb),
@@ -3143,14 +2812,11 @@ var ss = (function(undefined) {
          *     e.g. function(data) {data.column == "value";}
          */
         t.conf.upper = function(alpha, json, column, filterCb) {
-<<<<<<< HEAD
             // sanitize the data
             if (!isNaN(alpha) || alpha > 1 || alpha < 0){
                 throw new Error("t.conf: alpha must be a number between 0 and 1");
             }
 
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
             // If JSON has already been validated, crunch numbers
             if (json instanceof ValidJson) {
                 var sampleStdev = stdev(json.validJson, column, filterCb),
@@ -3181,7 +2847,6 @@ var ss = (function(undefined) {
             return t.conf.upper(alpha, self.json, column, filterCb);
         };
 
-<<<<<<< HEAD
         /**
          * Performs a 1 sample t test, returns the probability of achieving the data
          *     given the expected mean
@@ -3242,8 +2907,6 @@ var ss = (function(undefined) {
             return t.test1s(expectedMean, self.json, column, filterCb, alternative);
         };
 
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
         /* ----------------------- *
          * Chi Square Distribution *
          * ----------------------- */
@@ -3267,14 +2930,11 @@ var ss = (function(undefined) {
          *     e.g. function(data) {data.column == "value";}
          */
         chisq.conf = function(alpha, json, column, filterCb) {
-<<<<<<< HEAD
             // sanitize the data
             if (!isNaN(alpha) || alpha > 1 || alpha < 0){
                 throw new Error("t.conf: alpha must be a number between 0 and 1");
             }
 
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
             // If JSON has already been validated, crunch numbers
             if (json instanceof ValidJson) {
                 var sampleStdev = stdev(json.validJson, column, filterCb),
@@ -3320,14 +2980,11 @@ var ss = (function(undefined) {
          *     e.g. function(data) {data.column == "value";}
          */
         chisq.conf.lower = function(alpha, json, column, filterCb) {
-<<<<<<< HEAD
             // sanitize the data
             if (!isNaN(alpha) || alpha > 1 || alpha < 0){
                 throw new Error("t.conf: alpha must be a number between 0 and 1");
             }
 
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
             // If JSON has already been validated, crunch numbers
             if (json instanceof ValidJson) {
                 var sampleStdev = stdev(json.validJson, column, filterCb),
@@ -3374,14 +3031,11 @@ var ss = (function(undefined) {
          *     e.g. function(data) {data.column == "value";}
          */
         chisq.conf.upper = function(alpha, json, column, filterCb) {
-<<<<<<< HEAD
             // sanitize the data
             if (!isNaN(alpha) || alpha > 1 || alpha < 0){
                 throw new Error("t.conf: alpha must be a number between 0 and 1");
             }
 
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
             // If JSON has already been validated, crunch numbers
             if (json instanceof ValidJson) {
                 var sampleStdev = stdev(json.validJson, column, filterCb),
@@ -3411,7 +3065,6 @@ var ss = (function(undefined) {
         self.chisq.conf.upper = function(alpha, column, filterCb) {
             return chisq.conf.upper(alpha, self.json, column, filterCb);
         };
-<<<<<<< HEAD
 
         /**
          * Performs a 1 sample t test, returns the probability of achieving the data
@@ -3471,8 +3124,6 @@ var ss = (function(undefined) {
         self.chisq.test1s = function(expectedStdev, column, filterCb, alternative) {
             return chisq.test1s(expectedStdev, self.json, column, filterCb, alternative);
         };
-=======
->>>>>>> 09600fe547369a2a18d234cd175cf3ffc1b3ba35
     }
 
     return globalObject;
