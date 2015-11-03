@@ -1,5 +1,5 @@
 /**
- * Savvy Stats v0.0-alpha (http://savvystats.tk)
+ * Savvy Stats v0.2-alpha (http://savvystats.tk)
  * Copyright 2015 Tim Kennell Jr.
  * Licensed under the MIT License (http://opensource.org/licenses/MIT)
  **
@@ -258,11 +258,11 @@ var ss = (function(undefined) {
         var errors = [];
 
         // Input sanitization
-        if (!isInt(n)) {
+        if (n % 1 > 0) {
             errors.push("Permutation: The total number n from which k items are being chosen must be an integer: " + n);
         }
 
-        if (!isInt(k)) {
+        if (n % 1 > 0) {
             errors.push("Permutation: The number of k items to be chosen from n items must be an integer: " + k);
         }
 
@@ -368,7 +368,7 @@ var ss = (function(undefined) {
      */
     globalObject.binom.dist = function(successes, trials, probability, cumulative) {
         cumulative = typeof cumulative === "undefined" ? false: cumulative;
-        
+
         var errors = [];                 // error array for error reporting
 
         // Sanitizing input
@@ -431,10 +431,10 @@ var ss = (function(undefined) {
                 lastValue = mutExclProbabilityTerm;
             }
 
-            // -----------------------------------------------
+            // --------------------------------------------------
             // Basically the same as the combinations function
-            // Reused to allow larger calculations
-            // -----------------------------------------------
+            // Reused to allow calculations with larger arguments
+            // --------------------------------------------------
 
             // set numerator and denominator based on whether successes or trials-successes is bigger
             if (successes > trials - successes) {
@@ -477,6 +477,112 @@ var ss = (function(undefined) {
             }
             return total;
         }
+    };
+
+    /**
+     * Calculates the number of k successes that will result in the given
+     * cumulative probability based on a binomial distribution
+     * 
+     * @param Float cumulativeProb
+     * @param Integer trials
+     * @param Float successProb
+     */
+    globalObject.binom.inv = function(cumulativeProb, trials, successProb) {
+        var errors = [];
+
+        // Sanitize the data
+        if (isNaN(cumulativeProb) || cumulativeProb < 0 || cumulativeProb > 1) {
+            errors.push("binom.inv: the cumulative probability must be a number between 0 and 1");
+        }
+
+        if (isNaN(trials) || trials % 1 > 0 || trials < 0) {
+            errors.push("binom.inv: the trials must be an integer greater than 0");
+        }
+
+        if (isNaN(successProb) || successProb < 0 || successProb > 1) {
+            errors.push("binom.inv: The probability of success must be a number between 0 and 1");
+        }
+
+        if(errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        var k,                  // value for binomial distribution (mean = 0, stdev = 1)
+            diff,               // difference between guessed probability and user submitted probability
+            step = 2,           // gives faster convergence on diff
+            decStep = false,    // once the first overshoot occurs, step should always decrease from last
+            stepInc = 2,        // increase step to converge faster
+            stepDec = 0.5,      // decreases step for after overshoot
+            direction = 1,      // determines direction of alternation
+            iter = 0,           // how long has the calculation gone (used for debugging)
+            lastDiff = 0;       // used to calculate overshooting
+
+        // Make some intelligent guesses based on knowing that, for a binomial distribution,
+        // the mean is n * p, indicating that a probability > 0.5  --> k > n * p and probability < 0.5 --> k < n * p
+        // Floor is used to maintain discrete nature of k
+        if (cumulativeProb < 0.5) {
+            k = Math.floor(trials * successProb) - 1;
+        } else if (cumulativeProb > 0.5) {
+            k = Math.floor(trials * successProb) + 1;
+        } else {
+            k = Math.floor(trials * successProb);
+        }
+
+        // calculate difference to start iterations
+        diff = cumulativeProb - globalObject.binom.dist(k, trials, successProb, true);
+
+        // Guess is correct if step is 1 and calculated probability is greater than requested
+        // This is k that gives the first probability greater than requested
+        // (http://math.stackexchange.com/questions/1426069/finding-the-inverse-of-the-binomial-cumulative-distribution-function)
+        while (diff > 0 || Math.abs(step) !== 1) {
+            
+            // Change direction on number line based on whether still above or below actual value
+            if (diff > 0) {
+                direction = 1;
+            } else if (diff < 0) {
+                direction = -1;
+            } else {
+                direction = 0;
+            }
+
+            // overshoot occurred, always decrease step from here
+            if (lastDiff * diff < 0) {
+                decStep = true;
+            }
+
+            // Increase step rate until overshoot
+            if (decStep === false) {
+                step *= stepInc;
+
+            // Decrease step rate to narrow in, but prevent it from being less than one
+            // due to the fact that k must be an integer
+            } else {
+                step *= stepDec;
+                step = step < 1 ? 1 : step;
+            }
+
+            // create another guess and prevent k from being smaller than 0
+            // or larger than the number of trials to prevent binom.dist error
+            k += direction * step;
+            k = k < 0 ? 0 : k > trials ? trials : k;
+
+            // save lastDiff to check for overshoot
+            lastDiff = diff;
+
+            // Calculate difference to check
+            diff = cumulativeProb - globalObject.binom.dist(k, trials, successProb, true);
+
+            // Algorithm is attempting to go below k = 0 or above k = n and will infinitely loop
+            // k = 0 or k = n is the answer
+            if (diff === lastDiff) break;
+
+            // increase iterations (for debugging)
+            iter++;
+        }
+
+        // return value back based on user-select normal distribution
+        // return [Math.floor(k), globalObject.binom.dist(Math.floor(k), trials, successProb, true), iter]; // (for debugging)
+        return Math.floor(k);
     };
 
     /* -------------------- *
@@ -537,8 +643,120 @@ var ss = (function(undefined) {
             for (successes; successes >= 0; successes--) {
                 total += poissonDistCalc(successes, avgSuccesses);
             }
-            return total;
+
+            // 0.9999999999999999 has exceeded JavaScript's precision
+            return total === 0.9999999999999999 ? 1 : total;
         }
+    };
+
+    /**
+     * Calculates the number of k events that will result in the given
+     * cumulative probability based on a poisson distribution
+     * NOTE: this method is not precise at cumulativeProb ~ 1
+     * 
+     * @param Float cumulativeProb
+     * @param Float avgSuccesses
+     */
+    globalObject.poisson.inv = function(cumulativeProb, avgSuccesses) {
+        var errors = [];
+
+        // Sanitize the data
+        if (isNaN(cumulativeProb) || cumulativeProb < 0 || cumulativeProb > 1) {
+            errors.push("poisson.inv: the cumulative probability must be a number between 0 and 1");
+        }
+
+        if (isNaN(avgSuccesses) || avgSuccesses < 0) {
+            errors.push("poisson.inv: the trials must be a number greater than 0");
+        }
+
+        if(errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        // The only way to achieve a cumulative probability = 1 is to have an 
+        //     infinite number of occurrences
+        // 0.9999999999999999 for globalObject.poisson.dist has exceeded JavaScript's
+        //     precision and is equivalent to 1 in this case
+        if (cumulativeProb >= 0.9999999999999999) {
+            return Infinity;
+        }
+
+        var k,                  // value for binomial distribution (mean = 0, stdev = 1)
+            diff,               // difference between guessed probability and user submitted probability
+            step = 2,           // gives faster convergence on diff
+            decStep = false,    // once the first overshoot occurs, step should always decrease from last
+            stepInc = 2,        // increase step to converge faster
+            stepDec = 0.5,      // decreases step for after overshoot
+            direction = 1,      // determines direction of alternation
+            iter = 0,           // how long has the calculation gone (used for debugging)
+            lastDiff = 0;       // used to calculate overshooting
+
+        // Make some intelligent guesses based on knowing that, for a poisson distribution,
+        // the mean is mu, indicating that a probability > 0.5  --> k > mu and probability < 0.5 --> k < mu
+        // rounding is used to maintain discrete nature of k
+        if (cumulativeProb < 0.5) {
+            k = Math.round(avgSuccesses) - 1;
+        } else if (cumulativeProb > 0.5) {
+            k = Math.round(avgSuccesses) + 1;
+        } else {
+            k = Math.round(avgSuccesses);
+        }
+
+        // calculate difference to start iterations
+        diff = cumulativeProb - globalObject.poisson.dist(k, avgSuccesses, true);
+
+        // Guess is correct if step is 1 and calculated probability is greater than requested
+        // This is k that gives the first probability greater than requested
+        // (http://math.stackexchange.com/questions/1426069/finding-the-inverse-of-the-binomial-cumulative-distribution-function)
+        while (diff > 0 || Math.abs(step) !== 1) {
+
+            // Change direction on number line based on whether still above or below actual value
+            if (diff > 0) {
+                direction = 1;
+            } else if (diff < 0) {
+                direction = -1;
+            } else {
+                direction = 0;
+            }
+
+            // overshoot occurred, always decrease step from here
+            if (lastDiff * diff < 0) {
+                decStep = true;
+            }
+
+            // Increase step rate until overshoot
+            if (decStep === false) {
+                step *= stepInc;
+
+            // Decrease step rate to narrow in, but prevent it from being less than one
+            // due to the fact that k must be an integer
+            } else {
+                step *= stepDec;
+                step = step < 1 ? 1 : step;
+            }
+
+            // create another guess and prevent k from being smaller than 0
+            // to prevent binom.dist error
+            k += direction * step;
+            k = k < 0 ? 0 : k;
+
+            // save lastDiff to check for overshoot
+            lastDiff = diff;
+
+            // Calculate difference to check
+            diff = cumulativeProb - globalObject.poisson.dist(k, avgSuccesses, true);
+
+            // Algorithm is attempting to go below k = 0 and will infinitely loop
+            // k = 0 is the answer
+            if (diff === lastDiff) break;
+
+            // increase iterations (for debugging)
+            iter++;
+        }
+
+        // return value back based on user selected cumulative probability
+        // return [Math.floor(k), globalObject.poisson.dist(Math.floor(k), avgSuccesses, true), iter]; // (for debugging)
+        return Math.floor(k);
     };
 
     /* ------------------- *
@@ -554,7 +772,8 @@ var ss = (function(undefined) {
      * Integration of the above function results in the cumulative distribution function
      *
      * See https://en.wikipedia.org/wiki/Normal_distribution#Cumulative_distribution_function and 
-     *      https://en.wikipedia.org/wiki/Error_function for how this works
+     *      https://en.wikipedia.org/wiki/Error_function
+     *      for how this works
      * 
      * @param Float x
      * @param Float mean
@@ -569,15 +788,15 @@ var ss = (function(undefined) {
 
         // Sanitize the data
         if (isNaN(x)) {
-            errors.push("normdist: the x value " + x + " is not a number");
+            errors.push("norm.dist: the x value " + x + " is not a number");
         }
 
         if (isNaN(mean)) {
-            errors.push("normdist: the mean " + mean + " is not a number");
+            errors.push("norm.dist: the mean " + mean + " is not a number");
         }
 
         if (isNaN(stdev)) {
-            errors.push("normdist: the standard deviation " + stdev + " is not a number");
+            errors.push("norm.dist: the standard deviation " + stdev + " is not a number");
         }
 
         if(errors.length > 0) {
@@ -585,7 +804,7 @@ var ss = (function(undefined) {
         }
 
         // based on integration of normal distribution probability mass function
-        var errorFuncInput = ((x-mean)/stdev)/Math.sqrt(2),    // input t for error function
+        var errorFuncInput = ((x-mean)/stdev)/Math.sqrt(2),    // input of error function for normal cdf
             value = errorFuncInput,                            // storing original input for checking javascript rounding error
             sum = errorFuncInput,                              // initializing sum as starting with the input of the error function
             lastSum,                                           // remember the last sum for error tolerance
@@ -739,7 +958,10 @@ var ss = (function(undefined) {
      * @param Float popStdev
      * @param Int sampleSize
      */
-    globalObject.norm.conf = function(alpha, popStdev, sampleSize) {
+    globalObject.norm.conf = function(alpha, sampleMean, popStdev, sampleSize, type) {
+        // set default type to 2 (two-sided confidence interval) or lowercase string
+        type = typeof type === "undefined" ? 2 : typeof type === "string" ? type.toLowerCase() : type;
+
         var errors = [];
 
         // Sanitize the data
@@ -772,104 +994,42 @@ var ss = (function(undefined) {
         }
 
         // Based on the fact that the normal distribution is symmetric and P(X < mu) = 0.5
-        var cumulativeProb = 1 - alpha / 2;
+        var cumulativeProb,    // based on alpha level
+            z,                 // z statistic at alpha level
+            conf,              // value to be added and/or subtracted from the mean
+            interval = {};     // object containing the interval to be returned
 
-        var z = globalObject.norm.inv(cumulativeProb, 0, 1);
-        return z * popStdev / Math.sqrt(sampleSize);
-    };
+        // Set proper values for lower, two-sided, and upper confidence interval
+        if (type === 1 || type === "lower") {
+            cumulativeProb = 1 - alpha;
+            z = globalObject.norm.inv(cumulativeProb, 0, 1);
+            conf = z * popStdev / Math.sqrt(sampleSize);
 
-    /**
-     * Calculates the value z * stderror such that P(Z < z) is equal to the provided user alpha (1 - prob)
-     * where Z is normally distributed with mu = 0 and sigma = 1 (a standard normal distribution)
-     * and z = (x - mean)/sigma
-     * 
-     * In other words, calculates the lower confidence interval for a sample mean if the population 
-     * standard deviation is known
-     * 
-     * @param Float alpha
-     * @param Float popStdev
-     * @param Int sampleSize
-     */
-    globalObject.norm.conf.lower = function(alpha, popStdev, sampleSize) {
-        var errors = [];
+            interval.lower = NaN;
+            interval.upper = sampleMean + conf;
 
-        // Sanitize the data
-        if (isNaN(alpha)) {
-            errors.push("norm.conf: the alpha value " + alpha + " is not a number");
+        } else if (type === 2 || type === "two") {
+            cumulativeProb = 1 - alpha / 2;
+            z = globalObject.norm.inv(cumulativeProb, 0, 1);
+            conf = z * popStdev / Math.sqrt(sampleSize);
+
+            interval.lower = sampleMean - conf;
+            interval.upper = sampleMean + conf;
+
+        } else if (type === 3 || type === "upper") {
+            cumulativeProb = 1 - alpha;
+            z = globalObject.norm.inv(cumulativeProb, 0, 1);
+            conf = z * popStdev / Math.sqrt(sampleSize);
+
+            interval.lower = sampleMean - conf;
+            interval.upper = NaN;
+
+        // Throw error if type is not as indicated
+        } else {
+            throw new Error("norm.conf: The type must be a number between 1 - 3 or \"lower\", \"two\", or \"upper\"");
         }
 
-        if (alpha > 1 || alpha < 0) {
-            errors.push("norm.conf: the alpha " + alpha + " should be between 0 and 1 including the bounds");
-        }
-
-        if (isNaN(popStdev)) {
-            errors.push("norm.conf: the population standard " + popStdev + " is not a number");
-        }
-
-        if (!isNaN(popStdev) && popStdev < 0) {
-            errors.push("norm.conf: the population standard deviation " + popStdev + " should be positive");
-        }
-
-        if (isNaN(sampleSize)) {
-            errors.push("norm.conf: the sample size " + sampleSize + " is not a number");
-        }
-
-        if (!isNaN(sampleSize) && sampleSize < 0) {
-            errors.push("norm.conf: the sample size " + sampleSize + " should be positive");
-        }
-
-        // Based on the fact that the normal distribution is symmetric and P(X < mu) = 0.5
-        var cumulativeProb = 1 - alpha;
-
-        var z = globalObject.norm.inv(cumulativeProb, 0, 1);
-        return z * popStdev / Math.sqrt(sampleSize);
-    };
-
-    /**
-     * Calculates the value z * stderror such that P(Z > -z) is equal to the provided user alpha (1 - prob)
-     * where Z is normally distributed with mu = 0 and sigma = 1 (a standard normal distribution)
-     * and z = (x - mean)/sigma
-     * 
-     * In other words, calculates the upper confidence interval for a sample mean if the population 
-     * standard deviation is known
-     * 
-     * @param Float alpha
-     * @param Float popStdev
-     * @param Int sampleSize
-     */
-    globalObject.norm.conf.upper = function(alpha, popStdev, sampleSize) {
-        var errors = [];
-
-        // Sanitize the data
-        if (isNaN(alpha)) {
-            errors.push("norm.conf: the alpha value " + alpha + " is not a number");
-        }
-
-        if (alpha > 1 || alpha < 0) {
-            errors.push("norm.conf: the alpha " + alpha + " should be between 0 and 1 including the bounds");
-        }
-
-        if (isNaN(popStdev)) {
-            errors.push("norm.conf: the population standard " + popStdev + " is not a number");
-        }
-
-        if (!isNaN(popStdev) && popStdev < 0) {
-            errors.push("norm.conf: the population standard deviation " + popStdev + " should be positive");
-        }
-
-        if (isNaN(sampleSize)) {
-            errors.push("norm.conf: the sample size " + sampleSize + " is not a number");
-        }
-
-        if (!isNaN(sampleSize) && sampleSize < 0) {
-            errors.push("norm.conf: the sample size " + sampleSize + " should be positive");
-        }
-
-        // Based on the fact that the normal distribution is symmetric and P(X < mu) = 0.5
-        var cumulativeProb = 1 - alpha;
-
-        var z = globalObject.norm.inv(cumulativeProb, 0, 1);
-        return -z * popStdev / Math.sqrt(sampleSize);
+        return interval;
     };
 
     /**
@@ -1111,10 +1271,13 @@ var ss = (function(undefined) {
      * Returns the +/- value that is to be added added/subtracted to/from the sample mean
      * 
      * @param Float alpha
-     * @param Float stdev
+     * @param Float sampleStdev
      * @param Int sampleSize
      */
-    globalObject.t.conf = function(alpha, stdev, sampleSize) {
+    globalObject.t.conf = function(alpha, sampleMean, sampleStdev, sampleSize, type) {
+        // Sets default to 2 and lowercases if filled with a string
+        type = typeof type === "undefined" ? 2 : typeof type === "string" ? type.toLowerCase() : type;
+
         var errors = [];
 
         // Sanitize the data
@@ -1126,7 +1289,7 @@ var ss = (function(undefined) {
             errors.push("t.conf: The alpha value must be between 0 and 1");
         }
 
-        if (isNaN(stdev)) {
+        if (isNaN(sampleStdev)) {
             errors.push("t.conf: The standard deviation must be a number");
         }
 
@@ -1138,92 +1301,44 @@ var ss = (function(undefined) {
             errors.push("t.conf: The sample size must be a positive number");
         }
 
-        var prob = 1 - alpha / 2,    // probability is 1 minus desired alpha / 2 because t dist is symmetric
-            df = sampleSize - 1;     // standard df calculation
+        // Based on the fact that the normal distribution is symmetric and P(X < mu) = 0.5
+        var cumulativeProb,         // based on alpha level
+            t,                      // t statistic at alpha level
+            df = sampleSize - 1,    // df for the t test, same regardless of type
+            conf,                   // value to be added and/or subtracted from the mean
+            interval = {};          // object containing the interval to be returned
 
-        // Calculate the t value associated with the confidence interval
-        var t = globalObject.t.inv(prob, df, true);
-        return t * stdev / Math.sqrt(sampleSize);
-    };
+        // Set proper values for lower, two-sided, and upper confidence interval
+        if (type === 1 || type === "lower") {
+            cumulativeProb = 1 - alpha;
+            t = globalObject.t.inv(cumulativeProb, df);
+            conf = t * sampleStdev / Math.sqrt(sampleSize);
 
-    /**
-     * Calculates the lower confidence interval of a sample mean assuming the population variance is unknown
-     * Returns the (+) value that is to be added to the sample mean
-     * 
-     * @param Float alpha
-     * @param Float stdev
-     * @param Int sampleSize
-     */
-    globalObject.t.conf.lower = function(alpha, stdev, sampleSize) {
-        var errors = [];
+            interval.lower = NaN;
+            interval.upper = sampleMean + conf;
 
-        // Sanitize the data
-        if (isNaN(alpha)) {
-            errors.push("t.conf: The alpha value must be a number");
+        } else if (type === 2 || type === "two") {
+            cumulativeProb = 1 - alpha / 2;
+            t = globalObject.t.inv(cumulativeProb, df);
+            conf = t * sampleStdev / Math.sqrt(sampleSize);
+
+            interval.lower = sampleMean - conf;
+            interval.upper = sampleMean + conf;
+
+        } else if (type === 3 || type === "upper") {
+            cumulativeProb = 1 - alpha;
+            t = globalObject.t.inv(cumulativeProb, df);
+            conf = t * sampleStdev / Math.sqrt(sampleSize);
+
+            interval.lower = sampleMean - conf;
+            interval.upper = NaN;
+
+        // Throw error if type is not as indicated
+        } else {
+            throw new Error("t.conf: The type must be a number between 1 - 3 or \"lower\", \"two\", or \"upper\"");
         }
 
-        if (!isNaN(alpha) && (alpha > 1 || alpha < 0)) {
-            errors.push("t.conf: The alpha value must be between 0 and 1");
-        }
-
-        if (isNaN(stdev)) {
-            errors.push("t.conf: The standard deviation must be a number");
-        }
-
-        if (isNaN(sampleSize)) {
-            errors.push("t.conf: The sample size must be a number");
-        }
-
-        if (!isNaN(sampleSize) && sampleSize < 0) {
-            errors.push("t.conf: The sample size must be a positive number");
-        }
-
-        var prob = 1 - alpha,    // probability is 1 minus desired alpha / 2 because t dist is symmetric
-            df = sampleSize - 1;     // standard df calculation
-
-        // Calculate the t value associated with the confidence interval
-        var t = globalObject.t.inv(prob, df, true);
-        return t * stdev / Math.sqrt(sampleSize);
-    };
-
-    /**
-     * Calculates the upper confidence interval of a sample mean assuming the population variance is unknown
-     * Returns the (-) value that is to be subtracted from the sample mean
-     * 
-     * @param Float alpha
-     * @param Float stdev
-     * @param Int sampleSize
-     */
-    globalObject.t.conf.upper = function(alpha, stdev, sampleSize) {
-        var errors = [];
-
-        // Sanitize the data
-        if (isNaN(alpha)) {
-            errors.push("t.conf: The alpha value must be a number");
-        }
-
-        if (!isNaN(alpha) && (alpha > 1 || alpha < 0)) {
-            errors.push("t.conf: The alpha value must be between 0 and 1");
-        }
-
-        if (isNaN(stdev)) {
-            errors.push("t.conf: The standard deviation must be a number");
-        }
-
-        if (isNaN(sampleSize)) {
-            errors.push("t.conf: The sample size must be a number");
-        }
-
-        if (!isNaN(sampleSize) && sampleSize < 0) {
-            errors.push("t.conf: The sample size must be a positive number");
-        }
-
-        var prob = 1 - alpha,    // probability is 1 minus desired alpha / 2 because t dist is symmetric
-            df = sampleSize - 1;     // standard df calculation
-
-        // Calculate the t value associated with the confidence interval
-        var t = globalObject.t.inv(prob, df);
-        return -t * stdev / Math.sqrt(sampleSize);
+        return interval;
     };
 
     /**
@@ -1451,7 +1566,10 @@ var ss = (function(undefined) {
      * @param Float stdev
      * @param Int sampleSize
      */
-    globalObject.chisq.conf = function(alpha, stdev, sampleSize) {
+    globalObject.chisq.conf = function(alpha, sampleStdev, sampleSize, type) {
+        // Sets default to 2 and lowercases if filled with a string
+        type = typeof type === "undefined" ? 2 : typeof type === "string" ? type.toLowerCase() : type;
+
         var errors = [];
 
         // Sanitize the data
@@ -1463,7 +1581,7 @@ var ss = (function(undefined) {
             errors.push("chisq.conf: The alpha value must be between 0 and 1");
         }
 
-        if (isNaN(stdev)) {
+        if (isNaN(sampleStdev)) {
             errors.push("chisq.conf: The standard deviation must be a number");
         }
 
@@ -1483,118 +1601,51 @@ var ss = (function(undefined) {
             throw new Error(errors.join("; "));
         }
 
-        var lowerBoundProb = 1 - alpha/2,    // while counterintuitive as the lower bound, this is based on the derived solution
-            upperBoundProb = alpha/2,        // again, counterintuitive, but based on derived solution
-            lowerIntervalBound,              // lower bound of confidence interval (chi-square distribution is not symmetric)
-            upperIntervalBound;              // upper bound of confidence interval (chi-square distribution is not symmetric)
+        // Based on the fact that the normal distribution is symmetric and P(X < mu) = 0.5
+        var lowerBoundProb,         // based on alpha level
+            upperBoundProb,         // based on alpha level
+            lowerIntervalBound,     // lower bound of confidence interval (chi-square distribution is not symmetric)
+            upperIntervalBound,     // upper bound of confidence interval (chi-square distribution is not symmetric)
+            df = sampleSize - 1,    // df for the t test, same regardless of type
+            interval = {};          // object containing the interval to be returned
 
-        // Calculate the bounds of the interval
-        lowerIntervalBound = (sampleSize - 1) * Math.pow(stdev, 2) / globalObject.chisq.inv(lowerBoundProb, sampleSize - 1);
-        upperIntervalBound = (sampleSize - 1) * Math.pow(stdev, 2) / globalObject.chisq.inv(upperBoundProb, sampleSize - 1);
+        // Set proper values for lower, two-sided, and upper confidence interval
+        if (type === 1 || type === "lower") {
+            // while counterintuitive as the upper bound, this is based on the derivation
+            upperBoundProb = alpha;
 
-        // Note that the distribution is not symmetric, so a single value can't be returned
-        return [lowerIntervalBound, upperIntervalBound];
-    };
+            // Calculate the bound of the interval
+            upperIntervalBound = (sampleSize - 1) * Math.pow(sampleStdev, 2) / globalObject.chisq.inv(upperBoundProb, df);
 
-    /**
-     * Calculates the upper confidence interval for variance using the chisq distribution
-     * Solution comes from FUNDAMENTALS OF BIOSTATISTSICS SEVENTH EDITION Bernard Rosner p. 180
-     * 
-     * @param Float alpha
-     * @param Float stdev
-     * @param Int sampleSize
-     */
-    globalObject.chisq.conf.lower = function(alpha, stdev, sampleSize) {
-        var errors = [];
+            interval.lower = NaN;
+            interval.upper = upperIntervalBound;
 
-        // Sanitize the data
-        if (isNaN(alpha)) {
-            errors.push("chisq.conf: The alpha value must be a number");
+        } else if (type === 2 || type === "two") {
+            lowerBoundProb = 1 - alpha/2;
+            upperBoundProb = alpha/2;
+
+            lowerIntervalBound = (sampleSize - 1) * Math.pow(sampleStdev, 2) / globalObject.chisq.inv(lowerBoundProb, df);
+            upperIntervalBound = (sampleSize - 1) * Math.pow(sampleStdev, 2) / globalObject.chisq.inv(upperBoundProb, df);
+
+            interval.lower = lowerIntervalBound;
+            interval.upper = upperIntervalBound;
+
+        } else if (type === 3 || type === "upper") {
+            // while counterintuitive as the upper bound, this is based on the derivation
+            lowerBoundProb = 1 - alpha;
+
+            // Calculate the bound of the interval
+            lowerIntervalBound = (sampleSize - 1) * Math.pow(sampleStdev, 2) / globalObject.chisq.inv(lowerBoundProb, df);
+
+            interval.lower = lowerIntervalBound;
+            interval.upper = NaN;
+
+        // Throw error if type is not as indicated
+        } else {
+            throw new Error("chisq.conf: The type must be a number between 1 - 3 or \"lower\", \"two\", or \"upper\"");
         }
 
-        if (!isNaN(alpha) && (alpha > 1 || alpha < 0)) {
-            errors.push("chisq.conf: The alpha value must be between 0 and 1");
-        }
-
-        if (isNaN(stdev)) {
-            errors.push("chisq.conf: The standard deviation must be a number");
-        }
-
-        if (isNaN(sampleSize)) {
-            errors.push("chisq.conf: The sample size must be a number");
-        }
-
-        if (!isNaN(sampleSize) && sampleSize < 0) {
-            errors.push("chisq.conf: The sample size must be a positive number");
-        }
-
-        if (!isNaN(sampleSize) && !isInt(sampleSize)) {
-            errors.push("chisq.conf: The sample size must be an integer as only serial killers deal in fractions of people and we are assuming users don't fall into that category");
-        }
-
-        if (errors.length > 0) {
-            throw new Error(errors.join("; "));
-        }
-
-        var upperBoundProb = alpha,        // again, counterintuitive, but based on derived solution
-            upperIntervalBound;              // upper bound of confidence interval (chi-square distribution is not symmetric)
-
-        // Calculate the bounds of the interval
-        upperIntervalBound = (sampleSize - 1) * Math.pow(stdev, 2) / globalObject.chisq.inv(upperBoundProb, sampleSize - 1);
-
-        // Note that the distribution is not symmetric, so a single value can't be returned
-        return upperIntervalBound;
-    };
-
-    /**
-     * Calculates the right-sided confidence interval for variance using the chisq distribution
-     * Returns the value to be added to variance to create the lower bound
-     * Solution comes from FUNDAMENTALS OF BIOSTATISTSICS SEVENTH EDITION Bernard Rosner p. 180
-     * 
-     * @param Float alpha
-     * @param Float stdev
-     * @param Int sampleSize
-     */
-    globalObject.chisq.conf.upper = function(alpha, stdev, sampleSize) {
-        var errors = [];
-
-        // Sanitize the data
-        if (isNaN(alpha)) {
-            errors.push("chisq.conf: The alpha value must be a number");
-        }
-
-        if (!isNaN(alpha) && (alpha > 1 || alpha < 0)) {
-            errors.push("chisq.conf: The alpha value must be between 0 and 1");
-        }
-
-        if (isNaN(stdev)) {
-            errors.push("chisq.conf: The standard deviation must be a number");
-        }
-
-        if (isNaN(sampleSize)) {
-            errors.push("chisq.conf: The sample size must be a number");
-        }
-
-        if (!isNaN(sampleSize) && sampleSize < 0) {
-            errors.push("chisq.conf: The sample size must be a positive number");
-        }
-
-        if (!isNaN(sampleSize) && !isInt(sampleSize)) {
-            errors.push("chisq.conf: The sample size must be an integer as only serial killers deal in fractions of people and we are assuming users don't fall into that category");
-        }
-
-        if (errors.length > 0) {
-            throw new Error(errors.join("; "));
-        }
-
-        var lowerBoundProb = 1 - alpha,    // while counterintuitive as the lower bound, this is based on the derived solution
-            lowerIntervalBound;              // lower bound of confidence interval (chi-square distribution is not symmetric)
-
-        // Calculate the bounds of the interval
-        lowerIntervalBound = (sampleSize - 1) * Math.pow(stdev, 2) / globalObject.chisq.inv(lowerBoundProb, sampleSize - 1);
-
-        // Note that the distribution is not symmetric, so a single value can't be returned
-        return -lowerIntervalBound;
+        return interval;
     };
 
     /**
@@ -1660,7 +1711,7 @@ var ss = (function(undefined) {
     };
 
     /*=========================*
-     * File Statistics Section *
+     * Data Statistics Section *
      *=========================*/
 
     /**
@@ -2710,18 +2761,28 @@ var ss = (function(undefined) {
          *     used to filter values in column used for calculation based on values in the same column or other columns
          *     e.g. function(data) {data.column == "value";}
          */
-        t.conf = function(alpha, json, column, filterCb) {
+        t.conf = function(alpha, json, column, filterCb, type) {
             // sanitize the data
-            if (!isNaN(alpha) || alpha > 1 || alpha < 0){
+            if (isNaN(alpha) || alpha > 1 || alpha < 0){
                 throw new Error("t.conf: alpha must be a number between 0 and 1");
+            }
+
+            // This function is called from another function
+            // Therefore, all arguments have values, but they might be undefined 
+            //     meaning that the user didn't put them into the function that calls
+            //     this function
+            // So, check for "undefined", not the number of arguments
+            if (typeof type === "undefined" && (typeof filterCb === "string" || typeof filterCb === "number")) {
+                type = filterCb;
+                filterCb = undefined;
             }
 
             // If JSON has already been validated, crunch numbers
             if (json instanceof ValidJson) {
-                var sampleStdev = stdev(json.validJson, column, filterCb),
-                    sampleMean = mean(json.validJson, column, filterCb);
+                var sampleMean = mean(json.validJson, column, filterCb),
+                    sampleStdev = stdev(json.validJson, column, filterCb);
 
-                return [sampleMean - globalObject.t.conf(alpha, sampleStdev, json.count), sampleMean + globalObject.t.conf(alpha, sampleStdev, json.count)];
+                return globalObject.t.conf(alpha, sampleMean, sampleStdev, json.count, type);
 
             // Data has not been validated
             } else {
@@ -2730,7 +2791,7 @@ var ss = (function(undefined) {
                 try {
                     var validationReport = validateJson(json, column, filterCb);
                     var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                    return t.conf(alpha, validJson, column, filterCb);
+                    return t.conf(alpha, validJson, column, filterCb, type);
                 
                 // Validation failed, catch errors
                 } catch (err) {
@@ -2742,110 +2803,10 @@ var ss = (function(undefined) {
         };
         
         // Allowing JsonData to have access to t.conf for easy calculation on any column
-        self.t.conf = function(alpha, column, filterCb) {
-            return t.conf(alpha, self.json, column, filterCb);
+        self.t.conf = function(alpha, column, filterCb, type) {
+            return t.conf(alpha, self.json, column, filterCb, type);
         };
         
-
-        /**
-         * Calculates the lower confidence interval of the mean of a data set (column) assuming 
-         *     that the population variance is not known
-         * Data in column can be filtered with callback (filterCb)
-         * 
-         * @param Float alpha
-         * @param (JSON array) json
-         * @param String column
-         * @param function filterCb
-         *     takes an object in the JSON array as an argument
-         *     should return true or false
-         *     used to filter values in column used for calculation based on values in the same column or other columns
-         *     e.g. function(data) {data.column == "value";}
-         */
-        t.conf.lower = function(alpha, json, column, filterCb) {
-            // sanitize the data
-            if (!isNaN(alpha) || alpha > 1 || alpha < 0){
-                throw new Error("t.conf: alpha must be a number between 0 and 1");
-            }
-
-            // If JSON has already been validated, crunch numbers
-            if (json instanceof ValidJson) {
-                var sampleStdev = stdev(json.validJson, column, filterCb),
-                    sampleMean = mean(json.validJson, column, filterCb);
-                    
-                return sampleMean + globalObject.t.conf.lower(alpha, sampleStdev, json.count);
-
-            // Data has not been validated
-            } else {
-
-                // Attempt to validate... everything!!!
-                try {
-                    var validationReport = validateJson(json, column, filterCb);
-                    var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                    return t.conf.lower(alpha, validJson, column, filterCb);
-                
-                // Validation failed, catch errors
-                } catch (err) {
-                    
-                    // Re-throw for catching later
-                    throw err;
-                }
-            }
-        };
-        
-        // Allowing JsonData to have access to t.oneSidedConf for easy calculation on any column
-        self.t.conf.lower = function(alpha, column, filterCb) {
-            return t.conf.lower(alpha, self.json, column, filterCb);
-        };
-
-        /**
-         * Calculates the upper confidence interval of the mean of a data set (column) assuming 
-         *     that the population variance is not known
-         * Data in column can be filtered with callback (filterCb)
-         * 
-         * @param Float alpha
-         * @param (JSON array) json
-         * @param String column
-         * @param function filterCb
-         *     takes an object in the JSON array as an argument
-         *     should return true or false
-         *     used to filter values in column used for calculation based on values in the same column or other columns
-         *     e.g. function(data) {data.column == "value";}
-         */
-        t.conf.upper = function(alpha, json, column, filterCb) {
-            // sanitize the data
-            if (!isNaN(alpha) || alpha > 1 || alpha < 0){
-                throw new Error("t.conf: alpha must be a number between 0 and 1");
-            }
-
-            // If JSON has already been validated, crunch numbers
-            if (json instanceof ValidJson) {
-                var sampleStdev = stdev(json.validJson, column, filterCb),
-                    sampleMean = mean(json.validJson, column, filterCb);
-
-                return sampleMean + globalObject.t.conf.upper(alpha, sampleStdev, json.count);
-
-            // Data has not been validated
-            } else {
-
-                // Attempt to validate... everything!!!
-                try {
-                    var validationReport = validateJson(json, column, filterCb);
-                    var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                    return t.conf.upper(alpha, validJson, column, filterCb);
-                
-                // Validation failed, catch errors
-                } catch (err) {
-                    
-                    // Re-throw for catching later
-                    throw err;
-                }
-            }
-        };
-        
-        // Allowing JsonData to have access to t.oneSidedConf for easy calculation on any column
-        self.t.conf.upper = function(alpha, column, filterCb) {
-            return t.conf.upper(alpha, self.json, column, filterCb);
-        };
 
         /**
          * Performs a 1 sample t test, returns the probability of achieving the data
@@ -2929,18 +2890,27 @@ var ss = (function(undefined) {
          *     used to filter values in column used for calculation based on values in the same column or other columns
          *     e.g. function(data) {data.column == "value";}
          */
-        chisq.conf = function(alpha, json, column, filterCb) {
+        chisq.conf = function(alpha, json, column, filterCb, type) {
             // sanitize the data
-            if (!isNaN(alpha) || alpha > 1 || alpha < 0){
-                throw new Error("t.conf: alpha must be a number between 0 and 1");
+            if (isNaN(alpha) || alpha > 1 || alpha < 0){
+                throw new Error("chisq.conf: alpha must be a number between 0 and 1");
+            }
+
+            // This function is called from another function
+            // Therefore, all arguments have values, but they might be undefined 
+            //     meaning that the user didn't put them into the function that calls
+            //     this function
+            // So, check for "undefined", not the number of arguments
+            if (typeof type === "undefined" && (typeof filterCb === "string" || typeof filterCb === "number")) {
+                type = filterCb;
+                filterCb = undefined;
             }
 
             // If JSON has already been validated, crunch numbers
             if (json instanceof ValidJson) {
-                var sampleStdev = stdev(json.validJson, column, filterCb),
-                    sampleVariance = variance(json.validJson, column, filterCb);
-
-                return [sampleVariance - globalObject.chisq.conf(alpha, sampleStdev, json.count)[0], sampleVariance + globalObject.chisq.conf(alpha, sampleStdev, json.count)[1]];
+                var sampleStdev = stdev(json.validJson, column, filterCb);
+                
+                return globalObject.chisq.conf(alpha, sampleStdev, json.count, type);
 
             // Data has not been validated
             } else {
@@ -2949,7 +2919,7 @@ var ss = (function(undefined) {
                 try {
                     var validationReport = validateJson(json, column, filterCb);
                     var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                    return chisq.conf(alpha, validJson, column, filterCb);
+                    return chisq.conf(alpha, validJson, column, filterCb, type);
                 
                 // Validation failed, catch errors
                 } catch (err) {
@@ -2959,111 +2929,9 @@ var ss = (function(undefined) {
                 }
             }
         };
-
         // Add the chisq.conf function to the object as a method
-        self.chisq.conf = function(alpha, column, filterCb) {
-            return chisq.conf(alpha, self.json, column, filterCb);
-        };
-
-        /**
-         * Calculates the confidence interval of the variance of a data set (column) assuming 
-         *     that the population variance is not known
-         * Data in column can be filtered with callback (filterCb)
-         * 
-         * @param Float alpha
-         * @param (JSON array) json
-         * @param String column
-         * @param function filterCb
-         *     takes an object in the JSON array as an argument
-         *     should return true or false
-         *     used to filter values in column used for calculation based on values in the same column or other columns
-         *     e.g. function(data) {data.column == "value";}
-         */
-        chisq.conf.lower = function(alpha, json, column, filterCb) {
-            // sanitize the data
-            if (!isNaN(alpha) || alpha > 1 || alpha < 0){
-                throw new Error("t.conf: alpha must be a number between 0 and 1");
-            }
-
-            // If JSON has already been validated, crunch numbers
-            if (json instanceof ValidJson) {
-                var sampleStdev = stdev(json.validJson, column, filterCb),
-                    sampleVariance = variance(json.validJson, column, filterCb);
-
-                return sampleVariance + globalObject.chisq.conf.lower(alpha, sampleStdev, json.count);
-
-            // Data has not been validated
-            } else {
-
-                // Attempt to validate... everything!!!
-                try {
-                    var validationReport = validateJson(json, column, filterCb);
-                    var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                    return chisq.conf.lower(alpha, validJson, column, filterCb);
-                
-                // Validation failed, catch errors
-                } catch (err) {
-                    
-                    // Re-throw for catching later
-                    throw err;
-                }
-            }
-        };
-
-        // Add the chisq.conf function to the object as a method
-        self.chisq.conf.lower = function(alpha, column, filterCb) {
-            return chisq.conf.lower(alpha, self.json, column, filterCb);
-        };
-
-
-        /**
-         * Calculates the confidence interval of the variance of a data set (column) assuming 
-         *     that the population variance is not known
-         * Data in column can be filtered with callback (filterCb)
-         * 
-         * @param Float alpha
-         * @param (JSON array) json
-         * @param String column
-         * @param function filterCb
-         *     takes an object in the JSON array as an argument
-         *     should return true or false
-         *     used to filter values in column used for calculation based on values in the same column or other columns
-         *     e.g. function(data) {data.column == "value";}
-         */
-        chisq.conf.upper = function(alpha, json, column, filterCb) {
-            // sanitize the data
-            if (!isNaN(alpha) || alpha > 1 || alpha < 0){
-                throw new Error("t.conf: alpha must be a number between 0 and 1");
-            }
-
-            // If JSON has already been validated, crunch numbers
-            if (json instanceof ValidJson) {
-                var sampleStdev = stdev(json.validJson, column, filterCb),
-                    sampleVariance = variance(json.validJson, column, filterCb);
-
-                return sampleVariance + globalObject.chisq.conf.upper(alpha, sampleStdev, json.count);
-
-            // Data has not been validated
-            } else {
-
-                // Attempt to validate... everything!!!
-                try {
-                    var validationReport = validateJson(json, column, filterCb);
-                    var validJson = new ValidJson(validationReport.validJson, validationReport.count);
-                    return chisq.conf.upper(alpha, validJson, column, filterCb);
-                
-                // Validation failed, catch errors
-                } catch (err) {
-                    
-                    // Re-throw for catching later
-                    throw err;
-                }
-            }
-        };
-
-        // Add the chisq.conf function to the object as a method
-        self.chisq.conf.upper = function(alpha, column, filterCb) {
-            return chisq.conf.upper(alpha, self.json, column, filterCb);
+        self.chisq.conf = function(alpha, column, filterCb, type) {
+            return chisq.conf(alpha, self.json, column, filterCb, type);
         };
 
         /**
