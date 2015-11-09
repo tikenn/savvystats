@@ -274,6 +274,10 @@ var ss = (function(undefined) {
             throw new Error(errors.join("; "));
         }
 
+        // Function does not calculate n! or (n-k)!
+        // Calculates (n-k+1)! (same as n!/(n-k)!) in order to avoid
+        //     arithmetic overflow
+
         var product = 1;
 
         if (n === 0 || k === 0) {
@@ -1715,6 +1719,24 @@ var ss = (function(undefined) {
      *=========================*/
 
     /**
+     * Parses data into json array for use by the savvy stats object
+     * Allows ss([1,2,3,]).math_function or ss({"test": [1,2,3,4]}).math_function
+     * 
+     * @param Array or Object Literal data
+     */
+    globalObject.dataParser = function(data) {
+        var errors = [];
+
+        if (data.constructor === Array) {
+            console.log("I'm an array");
+        } else if (data.constructor === Object) {
+            console.log("I'm an object");
+        } else {
+            throw new Error("dataParser: can't parse data that is not in an array or object");
+        }
+    }
+
+    /**
      * Parses CSV and TSV file for loading into the ss object
      * Allows ss(file).math_function to be used for any file
      * 
@@ -1945,13 +1967,12 @@ var ss = (function(undefined) {
                 } else if (filterCb && typeof filterCb !== "function") {
                     throw new Error("The function " + filterCb + " is not a function or is improperly formed.");
                 }
-            }
 
-            // If no callback has been called, there is no reason to filter json data and array count
-            // Simply shove the arguments into the validationReporting object for return
-            if (!filterCb) {
-                validationReport.validJson = json;
-                validationReport.count = json.length;
+                // filter callback has not be used, filter data to only use rows in column that have data
+                if (!filterCb && json[i][column] !== "") {
+                    validationReport.validJson.push(json[i]);
+                    validationReport.count++;
+                }
             }
 
             // Default return
