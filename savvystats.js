@@ -15,9 +15,22 @@ var ss = (function(undefined) {
     "use strict";
 
     // Set up global object to return into the ss object
-    var globalObject = function(file, delimiter) {
-        if (typeof file === "undefined") throw new Error("Need a non-empty file argument.");
-        var json = fileParser(file, delimiter);
+    var globalObject = function(data, delimiter) {
+        if (typeof data === "undefined") throw new Error("Need a non-empty argument.");
+
+        // variable to receive data parsed into JSON
+        var json;
+
+        // Data presumably provided as file string (fileParser() will check this)
+        if (typeof data === "string") {
+            json = fileParser(data, delimiter);
+
+        // Data presumably provided as an appropriate array or object
+        } else if (data.constructor === Array || data.constructor === Object) {
+            json = dataParser(data);
+        } else {
+            throw new Error("ss: either a file parsed as a string or a single data array or object must be passed to the savvy stats object");
+        }
 
         return new JsonData(json);
     };
@@ -1721,19 +1734,54 @@ var ss = (function(undefined) {
     /**
      * Parses data into json array for use by the savvy stats object
      * Allows ss([1,2,3,]).math_function or ss({"test": [1,2,3,4]}).math_function
+     * Returns a classic JSON array --> [{"col_name": "value", "other_col_name": "value"}, {"col_name": "value", "other_col_name": "value"}]
      * 
      * @param Array or Object Literal data
      */
-    globalObject.dataParser = function(data) {
-        var errors = [];
+    var dataParser = function(data) {
+        var errors = [],
+            json = [];
 
+        // Expects data in a pure array (i.e. [1,3,5,2,3,1,3])
         if (data.constructor === Array) {
-            console.log("I'm an array");
+            // Map each value of the array as a new object with "defaultCol" as the property
+            // This default column name will be used in future functions
+            json = data.map(function(value) {
+                return {
+                    "defaultCol": value
+                };
+            });
+
+        // Expects data in object with properties naming the data arrays
+        // i.e. {"col_name": [1,2,3,4,4], "col_name": [1,2,3,4,5,6]}
         } else if (data.constructor === Object) {
-            console.log("I'm an object");
+            for (var column in data) {
+                if (data[column].constructor !== Array) {
+                    throw new Error("dataParser: all values of object properties must be arrays");
+                }
+
+                for (var i = 0; i < data[column].length; i++) {
+                    
+                    // This JSON array index is already an object
+                    // Add the index of the data array (from the provided data) to the object indexed at the same location
+                    if (typeof json[i] !== "undefined") {
+                        json[i][column] = data[column][i];
+
+                    // JSON array index is not already an object
+                    // Create the object and add the data from the proper data array
+                    } else {
+                        json[i] = {};
+                        json[i][column] = data[column][i];
+                    }
+                }
+            }
+
         } else {
             throw new Error("dataParser: can't parse data that is not in an array or object");
         }
+
+        // default return
+        return json;
     }
 
     /**
@@ -1759,11 +1807,11 @@ var ss = (function(undefined) {
 
         // Function shamelessly stolen from PapaParse (mholt | http://papaparse.com) and modified
         function guessLineEndings(input) {
-            input = input.substr(0, 1024*1024); // max length 1 MB
+            input = input.substr(0, 1024 * 1024); // max length 1 MB
 
             var r = input.split("\r");
 
-            if (r.length == 1) {
+            if (r.length === 1) {
                 var n = input.split("\n");
                 if (n.length > 1) {
                     return "\n";
@@ -1782,11 +1830,11 @@ var ss = (function(undefined) {
             return numWithN >= r.length / 2 ? "\r\n" : "\r";
         }
 
-        var lineEnding,
+        var lineEnding = guessLineEndings(file),
             dataLines,
             dataHeaders;
 
-        if (lineEnding = guessLineEndings(file)) {
+        if (lineEnding) {
             dataLines = file.split(lineEnding);
         } else {
             throw new Error("File provided has no line endings");
@@ -1906,7 +1954,8 @@ var ss = (function(undefined) {
             validationReport.count = 0;
 
             // In case multiple errors need to be thrown
-            var errors = [];
+            var errors = [],
+                missingColumn = 0;
 
             // -- Validating all input --
             // Make sure json is actually an array
@@ -1934,7 +1983,20 @@ var ss = (function(undefined) {
 
                 // Column argument must be a property of every JSON object
                 if (!json[i].hasOwnProperty(column)) {
-                    throw new Error("The column " + column + " does not exist; or, if you're sure it does, the json might be broken. Verify the JSON before continuing.");
+                    // Count the number of times the column has been missing
+                    missingColumn++;
+
+                    // if column is missing the whole length of the json
+                    // it doesn't exist, throw error
+                    if (missingColumn === json.length) {
+                        throw new Error("The column " + column + " does not exist; or, if you're sure it does, the json might be broken. Verify the JSON before continuing.");
+                    
+                    // Otherwise, it is just not in every object
+                    // (this accounts for users providing their own data in arrays of unequal length,
+                    // see dataParser())
+                    } else {
+                        continue;
+                    }
                 }
 
                 // column property argument listed must only consist of numbers
@@ -1969,6 +2031,8 @@ var ss = (function(undefined) {
                 }
 
                 // filter callback has not be used, filter data to only use rows in column that have data
+                // TODO: this seems messy for the files, I think it might be better to skip this data 
+                //     in the file and let the column detection above sort this out
                 if (!filterCb && json[i][column] !== "") {
                     validationReport.validJson.push(json[i]);
                     validationReport.count++;
