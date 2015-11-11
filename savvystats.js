@@ -390,25 +390,25 @@ var ss = (function(undefined) {
 
         // Sanitizing input
         if (!isInt(successes))
-            errors.push("The number of successes must be an integer (" + successes + ")");
+            errors.push("binom.dist: The number of successes must be an integer (" + successes + ")");
 
         if (successes < 0)
-            errors.push("The number of successes must be a positive integer (" + successes + ")");
+            errors.push("binom.dist: The number of successes must be a positive integer (" + successes + ")");
 
         if (!isInt(trials))
-            errors.push("The number of trials must be an integer (" + trials + ")");
+            errors.push("binom.dist: The number of trials must be an integer (" + trials + ")");
 
         if (trials < 0)
-            errors.push("The number of trials must be a positive integer (" + trials + ")");
+            errors.push("binom.dist: The number of trials must be a positive integer (" + trials + ")");
 
         if (successes > trials)
-            errors.push("It is impossible to have more successes than trials, in both life and statistics...");
+            errors.push("binom.dist: It is impossible to have more successes than trials, in both life and statistics...");
 
         if (typeof probability === "undefined")
-            errors.push("A probability of success must be provided");
+            errors.push("binom.dist: A probability of success must be provided");
 
         if (probability > 1 || probability < 0)
-            errors.push("The probability of a success must be between 0 and 1 (" + probability + ")");
+            errors.push("binom.dist: The probability of a success must be between 0 and 1 (" + probability + ")");
 
         if (errors.length > 0) {
             throw new Error(errors.join("; "));
@@ -602,6 +602,233 @@ var ss = (function(undefined) {
         return Math.floor(k);
     };
 
+    /**
+     * Calculates the individual success probability that will yield the given cumulative probability
+     *     under the given number of successes and sample size
+     * Function provided by adussaq (https://github.com/adussaq)
+     * 
+     * @param Float cumulativeProb
+     * @param Int successes
+     * @param Int trials
+     */
+    globalObject.binom.invp = function(cumulativeProb, successes, trials) {
+        var errors = [];
+
+        // Sanitize the data
+        if (isNaN(cumulativeProb) || cumulativeProb > 1 || cumulativeProb < 0) {
+            errors.push("binom.invprob: the cumulative probability must be a number between 0 and 1");
+        }
+
+        if (isNaN(trials) || trials % 1 > 0 || trials < 0) {
+            errors.push("binom.invprob: the trials must be an integer greater than 0");
+        }
+
+        if (isNaN(successes) || successes % 1 > 0 || successes > trials || successes < 0) {
+            errors.push("binom.invprob: the successes must be an integer greater than 0 and less than the number of trials");
+        }
+
+        if(errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        var p,                  // guess for the probability of a single success
+            center,             // the average of the binomial distribution as a function of p (not k)
+            diff,               // difference between guessed probability and user submitted probability
+            error = 1e-10,      // allowed error between guessed probability and user submitted probability
+            maxIter = 1000,     // after 1000 iterations, it's close enough
+            step = 0.25,        // gives faster convergence on diff
+            stepInc = 1.2,      // increase step to converge faster
+            stepDec = 0.5,      // decreases step for after overshoot
+            iter = 0,           // counts number of iterations
+            direction = 1,      // determines direction of alternation
+            lastDiff = 1;       // used to calculate overshooting
+
+        // Note that the cumulative binomial distribution as a function of p (not k)
+        //     is a constantly decreasing function
+        // Therefore, the center of the binomial distribution as a function of p (not k) will be at 
+        //     p = 0.5
+        // Making that calculation for center and then using that for the guess
+        center = ss.binom.dist(successes, trials, 0.5, true);
+
+        if (cumulativeProb > center) {
+            p = 0.3;
+        } else if (cumulativeProb < center) {
+            p = 0.7;
+        } else {
+            p = 0.5;
+        }
+
+        // Guess until gone for too many iterations or arrived within error
+        do {
+            // Check the guess
+            diff = cumulativeProb - globalObject.binom.dist(successes, trials, p, true);
+
+            // Change direction on number line based on whether still above or below actual value
+            // Remember that this is a decreasing function (most other inverse function have dealt 
+            //     with increasing functions)
+            if (diff > 0) {
+                direction = -1;
+            } else if (diff < 0) {
+                direction = 1;
+            } else {
+                direction = 0;
+            }
+
+            // Increase step rate until overshoot
+            if (lastDiff * diff > 0) {
+                step *= stepInc;
+
+            // Decrease step rate immediately after overshooting to narrow in
+            } else {
+                step *= stepDec;
+            }
+
+            // create another guess
+            p += direction * step;
+
+            // p can't be less than 0 or greater than 1
+            p = p < 0 ? p = 0 : p > 1 ? p = 1 : p;
+
+            // save last diff to check for overshooting
+            lastDiff = diff;
+
+            // Maintain count of iterations thus far
+            iter++;
+        } while (Math.abs(diff) > error && iter < maxIter);
+
+        // return value back based on user-select normal distribution
+        // return [p, globalObject.binom.dist(successes, trials, p, true), iter]; // (for debugging)
+        return p;
+    };
+
+    /**
+     * Calculates the confidence interval for the probability of k successes from a sample size n
+     *     assuming a binomial distribution
+     * Automatically uses and "exact" or "estimation" method based on n * p * q >= 5 for "estimation"
+     * Method described in FUNDAMENTALS OF BIOSTATISTSICS SEVENTH EDITION Bernard Rosner p. 185 - 6
+     * 
+     * @param Float alpha
+     * @param Int successes
+     * @param Int trials
+     * @param Int or String type
+     * @param String method
+     */
+    globalObject.binom.conf = function(alpha, successes, trials, type, method) {
+        // Start with method to check for type being the one not actually filled
+        
+        // Lowercase method for easy comparison
+        if (typeof method !== "undefined") {
+            method = method.toLowerCase();
+
+        // If only 4 arguments filled, and type has expected values for method
+        // then user has not specified type, they actually want method and the default type
+        } else if (arguments.length === 4 && (type === "estimate" || type === "exact")) {
+            method = type;
+            type = undefined;
+        }
+
+        // Set default type to 2 (two-tailed confidence interval) and lowercase any string passed for comparison
+        type = typeof type === "undefined" ? 2 : typeof type === "string" ? type.toLowerCase() : type;
+        
+        var errors = [];
+
+        if (isNaN(alpha) || alpha < 0 || alpha > 1) {
+            errors.push("binom.conf: alpha must be a number between 0 and 1");
+        }
+
+        if (isNaN(trials) || trials < 0) {
+            errors.push("binom.conf: the trials must be a number that is greater than 0");
+        }
+
+        if (isNaN(successes) || successes < 0 || successes > trials) {
+            errors.push("binom.conf: the successes must be a number that is between 0 and the number of trials");
+        }
+
+        if (typeof method !== "undefined" && method !== "estimate" && method !== "exact") {
+            errors.push("binom.conf: if set, the method must be \"exact\" or \"estimate\"");
+        }
+
+        if (errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        var p = successes / trials,    // probability of success
+            q = 1 - p,                 // probability of failure (mutually exclusive probability)
+            n = trials,                // sample size
+            z,                         // z statistic used in estimation method
+            cumulativeProb,            // probability associated with alpha value and direction of confidence interval
+            conf,                      // value to be added or subtracted from estimated p
+            interval = {};             // object returned that actually contains the conf interval
+
+        if (typeof method === "undefined") {
+            if (n * p * q >= 5) {
+                method = "estimate";
+            } else {
+                method = "exact";
+            }
+        }
+
+        // Binomial confidence interval based on normal estimation
+        if (method === "estimate") {
+            // Set proper values for lower, two-sided, and upper confidence interval
+            if (type === 1 || type === "lower") {
+                cumulativeProb = 1 - alpha;
+                z = globalObject.norm.inv(cumulativeProb, 0, 1);
+                conf = z * Math.sqrt(p * q / n);
+
+                interval.lower = NaN;
+                interval.upper = p + conf;
+
+            } else if (type === 2 || type === "two") {
+                cumulativeProb = 1 - alpha / 2;
+                z = globalObject.norm.inv(cumulativeProb, 0, 1);
+                conf = z * Math.sqrt(p * q / n);
+
+                interval.lower = p - conf;
+                interval.upper = p + conf;
+
+            } else if (type === 3 || type === "upper") {
+                cumulativeProb = 1 - alpha;
+                z = globalObject.norm.inv(cumulativeProb, 0, 1);
+                conf = z * Math.sqrt(p * q / n);
+
+                interval.lower = p - conf;
+                interval.upper = NaN;
+
+            // Throw error if type is not as indicated
+            } else {
+                throw new Error("binom.conf: The type must be a number between 1 - 3 or \"lower\", \"two\", or \"upper\"");
+            }
+
+        // Exact binomial confidence interval method
+        } else if (method === "exact") {
+            if (type === 1 || type === "lower") {
+                cumulativeProb = alpha;
+
+                interval.lower = NaN;
+                interval.upper = globalObject.binom.invp(cumulativeProb, successes, trials);
+
+            } else if (type === 2 || type === "two") {
+                cumulativeProb = alpha / 2;
+
+                interval.lower = globalObject.binom.invp(1 - cumulativeProb, successes - 1, trials);
+                interval.upper = globalObject.binom.invp(cumulativeProb, successes, trials);
+
+            } else if (type === 3 || type === "upper") {
+                cumulativeProb = alpha;
+
+                interval.lower = globalObject.binom.invp(1 - cumulativeProb, successes - 1, trials);
+                interval.upper = NaN;
+
+            // Throw error if type is not as indicated
+            } else {
+                throw new Error("binom.conf: The type must be a number between 1 - 3 or \"lower\", \"two\", or \"upper\"");
+            }
+        }
+
+        return interval;
+    };
+
     /* -------------------- *
      * Poisson Distribution *
      * -------------------- */
@@ -774,6 +1001,152 @@ var ss = (function(undefined) {
         // return value back based on user selected cumulative probability
         // return [Math.floor(k), globalObject.poisson.dist(Math.floor(k), avgSuccesses, true), iter]; // (for debugging)
         return Math.floor(k);
+    };
+
+    /**
+     * Calculates the number of average successes that will compute to a given cumulative probability
+     *     under a given number of successes
+     * Function provided by adussaq (https://github.com/adussaq)
+     * 
+     * @param Float cumulativeProb
+     * @param Int successes
+     */
+    globalObject.poisson.invmu = function(cumulativeProb, successes) {
+        var errors = [];
+
+        // Sanitize the data
+        if (isNaN(cumulativeProb) || cumulativeProb > 1 || cumulativeProb < 0) {
+            errors.push("poisson.invprob: the cumulative probability must be a number between 0 and 1");
+        }
+
+        if (isNaN(successes) || successes % 1 > 0 || successes < 0) {
+            errors.push("poisson.invprob: the successes must be an integer greater than 0 and less than the number of trials");
+        }
+
+        if(errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        var mu,                 // guess for the probability of a single success
+            diff,               // difference between guessed probability and user submitted probability
+            error = 1e-10,      // allowed error between guessed probability and user submitted probability
+            maxIter = 1000,     // after 1000 iterations, it's close enough
+            step = 0.25,        // gives faster convergence on diff
+            stepInc = 1.2,      // increase step to converge faster
+            stepDec = 0.5,      // decreases step for after overshoot
+            iter = 0,           // counts number of iterations
+            direction = 1,      // determines direction of alternation
+            lastDiff = 1;       // used to calculate overshooting
+
+        // The center of a poisson distribution is mu
+        // Since the poisson distribution as a function of mu (not k) is a constantly
+        //     increasing function, a cumulative probability must have a mu greater than k
+        //     and vice versa
+        if (cumulativeProb > 0.5) {
+            mu = successes + 1;
+        } else {
+            mu = successes - 1;
+        }
+
+        // Guess until gone for too many iterations or arrived within error
+        do {
+            // Check the guess
+            diff = cumulativeProb - globalObject.poisson.dist(successes, mu, true);
+
+            // Change direction on number line based on whether still above or below actual value
+            // Note that the poisson distribution as a function of mu is a decreasing function
+            //     unlike most of the functions that have been handled thus far
+            if (diff > 0) {
+                direction = -1;
+            } else if (diff < 0) {
+                direction = 1;
+            } else {
+                direction = 0;
+            }
+
+            // Increase step rate until overshoot
+            if (lastDiff * diff > 0) {
+                step *= stepInc;
+
+            // Decrease step rate immediately after overshooting to narrow in
+            } else {
+                step *= stepDec;
+            }
+
+            // create another guess
+            mu += direction * step;
+
+            // mu can't be less than 0
+            mu = mu < 0 ? mu = 0 : mu;
+
+            // save last diff to check for overshooting
+            lastDiff = diff;
+
+            // Maintain count of iterations thus far
+            iter++;
+        } while (Math.abs(diff) > error && iter < maxIter);
+
+        // return value back based on user-select normal distribution
+        // return [mu, globalObject.poisson.dist(successes, mu, true), iter]; // (for debugging)
+        return mu;
+    };
+
+    /**
+     * Calculates the confidence interval for the probability of k successes in a given time interval
+     *     assuming a poisson distribution
+     * Uses an exact method only 
+     * Method described in FUNDAMENTALS OF BIOSTATISTSICS SEVENTH EDITION Bernard Rosner p. 191
+     * 
+     * @param Float alpha
+     * @param Int successes
+     * @param Int or String type
+     */
+    globalObject.poisson.conf = function(alpha, successes, type) {
+        // Set default type to 2 (two-tailed confidence interval) and lowercase any string passed for comparison
+        type = typeof type === "undefined" ? 2 : typeof type === "string" ? type.toLowerCase() : type;
+        
+        var errors = [];
+
+        if (isNaN(alpha) || alpha < 0 || alpha > 1) {
+            errors.push("poisson.conf: alpha must be a number between 0 and 1");
+        }
+
+        if (isNaN(successes) || successes < 0) {
+            errors.push("poisson.conf: the successes must be a number that is between 0 and the number of trials");
+        }
+
+        if (errors.length > 0) {
+            throw new Error(errors.join("; "));
+        }
+
+        var cumulativeProb,             // probability associated with alpha value and direction of confidence interval
+            conf,                       // value to be added or subtracted from estimated p
+            interval = {};              // object returned that actually contains the conf interval
+
+        if (type === 1 || type === "lower") {
+            cumulativeProb = alpha;
+
+            interval.lower = NaN;
+            interval.upper = globalObject.poisson.invmu(cumulativeProb, successes);
+
+        } else if (type === 2 || type === "two") {
+            cumulativeProb = alpha / 2;
+
+            interval.lower = globalObject.poisson.invmu(1 - cumulativeProb, successes - 1);
+            interval.upper = globalObject.poisson.invmu(cumulativeProb, successes);
+
+        } else if (type === 3 || type === "upper") {
+            cumulativeProb = alpha;
+
+            interval.lower = globalObject.poisson.invmu(1 - cumulativeProb, successes - 1);
+            interval.upper = NaN;
+
+        // Throw error if type is not as indicated
+        } else {
+            throw new Error("poisson.conf: The type must be a number between 1 - 3 or \"lower\", \"two\", or \"upper\"");
+        }
+
+        return interval;
     };
 
     /* ------------------- *
